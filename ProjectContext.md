@@ -339,6 +339,9 @@ xmrig-fleet/
 - [x] Hashvault parsing against live data — balance, payout threshold, paid total, network hashrate, XMR price in the configured currency
 - [x] Per-node electricity tariff: two nodes at 200 W on 5.00 and 12.00 RUB/kWh summed
       to 81.60 RUB/day, not the 48.00 a single fleet rate would have produced
+- [x] Income estimate cross-checked against `hashrate × 86400 × reward / difficulty`
+      computed independently from the live pool figures (0.000772 XMR/day at 10 kH/s),
+      and shown beside the pool's own `dailyCredited` with a ratio
 - [x] Price falls back to the external feed only for currencies the pool omits, and is
       left blank rather than substituted: verified `GBP` via the feed and `KZT` blank
       (no source carries it)
@@ -360,7 +363,6 @@ xmrig-fleet/
       `powerFallbackWatts` workaround where real readings exist
 - [ ] Hashrate history with a sparkline per node
 - [ ] Alerting: node offline, miner dead, temperature over threshold
-- [ ] Compare estimated income against Hashvault `dailyCredited` on one screen
 - [ ] Per-node XMRig config templates (thread pinning, huge pages, MSR flags)
 - [ ] Automatic miner restart when a node reports zero hashrate while mining
 
@@ -370,8 +372,14 @@ xmrig-fleet/
 - **Hashrate is unreadable for a miner the agent did not start** — it holds its own API
   token. The console shows `mining (no api)` until the miner is restarted through the
   fleet.
-- **Income is an expectation, not a payout.** It is hashrate share × block reward ×
-  720 blocks/day. Reconcile against **Pool & wallet**.
+- **Income is an expectation, not a payout.** It reduces to
+  `hashrate × 86400 × blockReward / difficulty`, extrapolating the hashrate measured right
+  now across a whole day. **Economics** now shows it next to the pool's `dailyCredited`
+  with a ratio, but the two legitimately diverge: the pool figure is a rolling 24h for the
+  entire wallet, including machines outside this fleet, and variance alone moves it.
+- **Pool fees are not subtracted.** Hashvault reports `pplns_fee: 0`, so the estimate is
+  correct for the default pool; point `pool.apiBase` at a pool that charges a fee and the
+  estimate will be high by that fee.
 - **CPU temperature and package power need PawnIO** ([pawnio.eu](https://pawnio.eu)).
   Without it LibreHardwareMonitor starts and reports only what needs no kernel access,
   which is why GPU figures appear and CPU figures do not. PawnIO's compatibility with

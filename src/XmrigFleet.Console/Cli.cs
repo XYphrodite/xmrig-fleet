@@ -135,19 +135,25 @@ internal sealed class EconomicsScreenReport(FleetConfig config, FleetService fle
     {
         var pollTask = fleet.PollAsync(ct);
         var networkTask = market.GetNetworkStatsAsync(ct);
+        var walletTask = market.GetWalletStatsAsync(ct);
         var priceTask = market.GetPriceAsync(ct);
-        await Task.WhenAll(pollTask, networkTask, priceTask);
+        await Task.WhenAll(pollTask, networkTask, walletTask, priceTask);
 
         var economics = Economics.Calculate(pollTask.Result, config, networkTask.Result, priceTask.Result);
         var currency = economics.Currency;
+        var credited = walletTask.Result?.CreditedTodayXmr;
 
         var table = new Table().Border(TableBorder.Rounded)
             .AddColumn("Metric").AddColumn(new TableColumn("Value").RightAligned());
         table.AddRow("Hashrate", Economics.FormatHashrate(economics.TotalHashrate));
         table.AddRow("Power draw", $"{economics.TotalWatts:0} W");
         table.AddRow("Electricity per day", UiHelpers.Money(economics.CostPerDay, currency));
-        table.AddRow("Income per day", economics.XmrPerDay is { } x ? $"{x:0.00000} XMR" : "-");
+        table.AddRow("Income per day (estimate)", economics.XmrPerDay is { } x ? $"{x:0.000000} XMR" : "-");
         table.AddRow($"Income per day, {currency}", UiHelpers.Money(economics.RevenuePerDay, currency));
+        table.AddRow("Credited by the pool, 24h", credited is { } c ? $"{c:0.000000} XMR" : "-");
+        table.AddRow("Actual vs estimate", economics.XmrPerDay is > 0 && credited is { } c2
+            ? $"{c2 / economics.XmrPerDay.Value:P0}"
+            : "-");
         table.AddRow("Profit per day", UiHelpers.Signed(economics.ProfitPerDay, currency));
         table.AddRow("Cost per XMR", UiHelpers.Money(economics.CostPerXmr, currency));
         AnsiConsole.Write(table);

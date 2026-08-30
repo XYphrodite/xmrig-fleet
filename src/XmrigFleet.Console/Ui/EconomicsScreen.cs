@@ -22,16 +22,19 @@ public sealed class EconomicsScreen
 
         IReadOnlyList<NodeState> states = [];
         PoolNetworkStats? network = null;
+        PoolWalletStats? wallet = null;
         double? price = null;
 
         await AnsiConsole.Status().StartAsync("Collecting fleet and market data...", async _ =>
         {
             var pollTask = _fleet.PollAsync(ct);
             var networkTask = _market.GetNetworkStatsAsync(ct);
+            var walletTask = _market.GetWalletStatsAsync(ct);
             var priceTask = _market.GetPriceAsync(ct);
-            await Task.WhenAll(pollTask, networkTask, priceTask);
+            await Task.WhenAll(pollTask, networkTask, walletTask, priceTask);
             states = pollTask.Result;
             network = networkTask.Result;
+            wallet = walletTask.Result;
             price = priceTask.Result;
         });
 
@@ -115,10 +118,50 @@ public sealed class EconomicsScreen
 
         AnsiConsole.Write(breakdown);
 
-        AnsiConsole.MarkupLine(
-            "[grey]Income is an expectation from network difficulty, not a payout record. " +
-            "Compare it against the pool balance under Pool & wallet.[/]");
+        RenderReconciliation(economics, wallet, price, currency);
 
         UiHelpers.Pause();
+    }
+
+    /// <summary>
+    /// Puts the estimate next to what the pool actually credited, so the operator does not
+    /// have to hold two screens in their head. A large gap is a signal worth chasing: a node
+    /// mining to the wrong wallet, a miner submitting no shares, or simply pool variance.
+    /// </summary>
+    private void RenderReconciliation(FleetEconomics economics, PoolWalletStats? wallet, double? price, string currency)
+    {
+        AnsiConsole.WriteLine();
+
+        var grid = new Grid().AddColumn().AddColumn().AddColumn();
+        grid.AddRow(
+            new Markup("[grey]Estimated per day[/]"),
+            new Markup(economics.XmrPerDay is { } est ? $"{est:0.000000} XMR" : "[grey]-[/]"),
+            new Markup(UiHelpers.Money(economics.RevenuePerDay, currency)));
+        grid.AddRow(
+            new Markup("[grey]Credited by the pool[/]"),
+            new Markup(wallet?.CreditedTodayXmr is { } act ? $"{act:0.000000} XMR" : "[grey]-[/]"),
+            new Markup(wallet?.CreditedTodayXmr is { } act2 && price is { } p
+                ? UiHelpers.Money(act2 * p, currency)
+                : "[grey]-[/]"));
+
+        if (economics.XmrPerDay is > 0 && wallet?.CreditedTodayXmr is { } credited)
+        {
+            var ratio = credited / economics.XmrPerDay.Value;
+            var colour = ratio switch { >= 0.8 and <= 1.25 => "green", >= 0.5 => "yellow", _ => "red" };
+            grid.AddRow(
+                new Markup("[grey]Actual vs estimate[/]"),
+                new Markup($"[{colour}]{ratio:P0}[/]"),
+                new Markup(""));
+        }
+
+        AnsiConsole.Write(new Panel(grid)
+            .Header("[bold]Estimate against the pool[/]")
+            .Border(BoxBorder.Rounded)
+            .Expand());
+
+        AnsiConsole.MarkupLine(
+            "[grey]The estimate extrapolates the hashrate measured right now across a whole day; " +
+            "the pool figure is a rolling 24h for the entire wallet, including any machine outside " +
+            "this fleet. They diverge on variance alone, so read a gap as a hint, not a verdict.[/]");
     }
 }
