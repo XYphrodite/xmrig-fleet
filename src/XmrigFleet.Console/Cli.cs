@@ -151,20 +151,21 @@ internal sealed class EconomicsScreenReport(FleetConfig config, FleetService fle
         var economics = Economics.Calculate(pollTask.Result, config, networkTask.Result, priceTask.Result);
         var currency = economics.Currency;
         var credited = walletTask.Result?.CreditedTodayXmr;
+        var money = await market.GetMoneyFormatAsync(ct);
 
         var table = new Table().Border(TableBorder.Rounded)
             .AddColumn("Metric").AddColumn(new TableColumn("Value").RightAligned());
         table.AddRow("Hashrate", Economics.FormatHashrate(economics.TotalHashrate));
         table.AddRow("Power draw", $"{economics.TotalWatts:0} W");
-        table.AddRow("Electricity per day", UiHelpers.Money(economics.CostPerDay, currency));
+        table.AddRow("Electricity per day", money.Markup(economics.CostPerDay));
         table.AddRow("Income per day (estimate)", economics.XmrPerDay is { } x ? $"{x:0.000000} XMR" : "-");
-        table.AddRow($"Income per day, {currency}", UiHelpers.Money(economics.RevenuePerDay, currency));
+        table.AddRow($"Income per day, {currency}", money.Markup(economics.RevenuePerDay));
         table.AddRow("Credited by the pool, 24h", credited is { } c ? $"{c:0.000000} XMR" : "-");
         table.AddRow("Actual vs estimate", economics.XmrPerDay is > 0 && credited is { } c2
             ? $"{c2 / economics.XmrPerDay.Value:P0}"
             : "-");
-        table.AddRow("Profit per day", UiHelpers.Signed(economics.ProfitPerDay, currency));
-        table.AddRow("Cost per XMR", UiHelpers.Money(economics.CostPerXmr, currency));
+        table.AddRow("Profit per day", money.Signed(economics.ProfitPerDay));
+        table.AddRow("Cost per XMR", money.Markup(economics.CostPerXmr));
         AnsiConsole.Write(table);
     }
 }
@@ -188,6 +189,7 @@ internal sealed class PoolReport(FleetConfig config, MarketService market)
         var wallet = walletTask.Result;
         var network = networkTask.Result;
         var price = priceTask.Result;
+        var money = await market.GetMoneyFormatAsync(ct);
 
         if (wallet is null)
         {
@@ -201,12 +203,12 @@ internal sealed class PoolReport(FleetConfig config, MarketService market)
         table.AddRow("Valid shares", wallet.ValidShares?.ToString("N0") ?? "-");
         table.AddRow("Confirmed balance", wallet.ConfirmedBalanceXmr is { } d ? $"{d:0.000000} XMR" : "-");
         table.AddRow($"Confirmed balance, {config.Electricity.Currency}", wallet.ConfirmedBalanceXmr is { } d2 && price is { } p
-            ? UiHelpers.Money(d2 * p, config.Electricity.Currency) : "-");
+            ? money.Markup(d2 * p) : "-");
         table.AddRow("Unconfirmed", wallet.UnconfirmedBalanceXmr is { } u ? $"{u:0.000000} XMR" : "-");
         table.AddRow("Payout threshold", wallet.PayoutThresholdXmr is { } t ? $"{t:0.000000} XMR" : "-");
         table.AddRow("Paid out", wallet.TotalPaidXmr is { } paid ? $"{paid:0.000000} XMR" : "-");
         table.AddRow("Network hashrate", network?.NetworkHashrate is { } nh ? Economics.FormatHashrate(nh) : "-");
-        table.AddRow("XMR price", price is null ? "-" : $"{price:N2} {config.Electricity.Currency}");
+        table.AddRow("XMR price", money.Format(price));
         AnsiConsole.Write(table);
     }
 }

@@ -28,6 +28,7 @@ public sealed class PoolScreen
         PoolWalletStats? wallet = null;
         PoolNetworkStats? network = null;
         double? price = null;
+        MoneyFormat money = MoneyFormat.Single(_config.Electricity.Currency);
 
         await AnsiConsole.Status().StartAsync("Querying the pool...", async _ =>
         {
@@ -38,6 +39,7 @@ public sealed class PoolScreen
             wallet = walletTask.Result;
             network = networkTask.Result;
             price = priceTask.Result;
+            money = await _market.GetMoneyFormatAsync(ct);
         });
 
         var currency = _config.Electricity.Currency;
@@ -64,10 +66,10 @@ public sealed class PoolScreen
             AnsiConsole.Write(new Panel(grid).Header("[bold]This wallet on the pool[/]").Border(BoxBorder.Rounded).Expand());
 
             var balance = new Grid().AddColumn().AddColumn().AddColumn();
-            balance.AddRow(Xmr("Confirmed balance", wallet.ConfirmedBalanceXmr, price, currency, bold: true));
-            balance.AddRow(Xmr("Unconfirmed", wallet.UnconfirmedBalanceXmr, price, currency));
-            balance.AddRow(Xmr("Credited today", wallet.CreditedTodayXmr, price, currency));
-            balance.AddRow(Xmr("Paid out total", wallet.TotalPaidXmr, price, currency));
+            balance.AddRow(Xmr("Confirmed balance", wallet.ConfirmedBalanceXmr, price, money, bold: true));
+            balance.AddRow(Xmr("Unconfirmed", wallet.UnconfirmedBalanceXmr, price, money));
+            balance.AddRow(Xmr("Credited today", wallet.CreditedTodayXmr, price, money));
+            balance.AddRow(Xmr("Paid out total", wallet.TotalPaidXmr, price, money));
             balance.AddRow(
                 new Markup("[grey]Payouts sent[/]"),
                 new Markup(wallet.PaymentsSent?.ToString("N0") ?? "-"),
@@ -98,21 +100,21 @@ public sealed class PoolScreen
             net.AddRow("[grey]Block height[/]", network.NetworkHeight?.ToString("N0") ?? "-");
             net.AddRow("[grey]Block reward[/]", network.BlockRewardXmr is { } r ? $"{r:0.000} XMR" : "-");
             net.AddRow("[grey]Block time[/]", $"{network.BlockTimeSeconds}s");
-            net.AddRow("[grey]XMR price[/]", price is null ? "-" : $"{price:N2} {UiHelpers.Escape(currency)}");
+            net.AddRow("[grey]XMR price[/]", money.Markup(price));
             AnsiConsole.Write(new Panel(net).Header("[bold]Pool & network[/]").Border(BoxBorder.Rounded).Expand());
         }
 
         UiHelpers.Pause();
     }
 
-    private static Spectre.Console.Rendering.IRenderable[] Xmr(string label, double? amount, double? price, string currency, bool bold = false)
+    private static Spectre.Console.Rendering.IRenderable[] Xmr(string label, double? amount, double? price, MoneyFormat money, bool bold = false)
     {
         var value = amount is null ? "-" : $"{amount.Value:0.000000} XMR";
         return
         [
             new Markup($"[grey]{UiHelpers.Escape(label)}[/]"),
             new Markup(bold ? $"[bold]{value}[/]" : value),
-            new Markup(amount is { } a && price is { } p ? UiHelpers.Money(a * p, currency) : ""),
+            new Markup(amount is { } a && price is { } p ? money.Markup(a * p) : ""),
         ];
     }
 }

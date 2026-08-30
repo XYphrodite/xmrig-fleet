@@ -145,7 +145,16 @@ public sealed class UpdateConfig
 public sealed class ElectricityConfig
 {
     public double PricePerKwh { get; set; } = 5.0;
+
+    /// <summary>The currency every amount is counted in: the tariff, costs and income.</summary>
     public string Currency { get; set; } = "RUB";
+
+    /// <summary>
+    /// Optional second currency each amount is echoed in. Blank shows amounts once.
+    /// The rate comes from the pool quoting XMR in both currencies, so both columns move
+    /// together instead of drifting apart on two different feeds.
+    /// </summary>
+    public string? SecondaryCurrency { get; set; } = "USD";
 }
 
 public sealed class PoolConfig

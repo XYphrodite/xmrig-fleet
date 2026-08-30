@@ -18,6 +18,7 @@ public sealed class Dashboard
 
     private PoolNetworkStats? _network;
     private double? _price;
+    private MoneyFormat? _money;
     private DateTimeOffset _marketFetchedAt = DateTimeOffset.MinValue;
 
     public Dashboard(FleetConfig config, FleetService fleet, MarketService market)
@@ -68,10 +69,12 @@ public sealed class Dashboard
         await Task.WhenAll(networkTask, priceTask);
         _network = networkTask.Result ?? _network;
         _price = priceTask.Result ?? _price;
+        _money = await _market.GetMoneyFormatAsync(ct);
     }
 
     private IRenderable Compose(IReadOnlyList<NodeState> states, FleetEconomics economics)
     {
+        var money = _money ?? MoneyFormat.Single(economics.Currency);
         var table = new Table()
             .Border(TableBorder.Rounded)
             .BorderColor(Color.Grey35)
@@ -114,14 +117,14 @@ public sealed class Dashboard
             Cell("Hashrate", $"[aqua]{Economics.FormatHashrate(economics.TotalHashrate)}[/]"),
             Cell("Draw", $"{economics.TotalWatts:0} W"));
         summary.AddRow(
-            Cell("Power cost/day", UiHelpers.Money(economics.CostPerDay, economics.Currency)),
+            Cell("Power cost/day", money.Markup(economics.CostPerDay)),
             Cell("Income/day", economics.XmrPerDay is { } xmr
-                ? $"{xmr:0.00000} XMR  {UiHelpers.Money(economics.RevenuePerDay, economics.Currency)}"
+                ? $"{xmr:0.00000} XMR  {money.Markup(economics.RevenuePerDay)}"
                 : "[grey]needs pool data[/]"),
-            Cell("Profit/day", UiHelpers.Signed(economics.ProfitPerDay, economics.Currency)));
+            Cell("Profit/day", money.Signed(economics.ProfitPerDay)));
 
         var footer = new Markup(
-            $"[grey]price[/] {(_price is null ? "[grey]-[/]" : $"{_price:N0} {UiHelpers.Escape(_config.Electricity.Currency)}")}   " +
+            $"[grey]price[/] {money.Markup(_price)}   " +
             $"[grey]net[/] {(_network?.NetworkHashrate is { } nh ? Economics.FormatHashrate(nh) : "-")}   " +
             "[grey]press any key to return[/]");
 

@@ -161,6 +161,34 @@ public sealed class MarketService : IDisposable
         return (null, null);
     }
 
+    /// <summary>
+    /// How to show amounts: the fleet currency, plus the second one when the pool quotes XMR
+    /// in both. Taking the cross rate from a single quote keeps every figure on screen
+    /// mutually consistent; if either side is missing the echo is dropped rather than
+    /// fetched from somewhere else.
+    /// </summary>
+    public async Task<MoneyFormat> GetMoneyFormatAsync(CancellationToken ct)
+    {
+        var primary = _config.Electricity.Currency;
+        var secondary = _config.Electricity.SecondaryCurrency;
+        if (string.IsNullOrWhiteSpace(secondary) ||
+            secondary.Equals(primary, StringComparison.OrdinalIgnoreCase))
+        {
+            return MoneyFormat.Single(primary);
+        }
+
+        var pool = await GetPoolStatsAsync(ct);
+        if (pool is null) return MoneyFormat.Single(primary);
+
+        var market = Path(pool.Value, "market");
+        var inPrimary = Number(market, $"price_{primary.ToLowerInvariant()}");
+        var inSecondary = Number(market, $"price_{secondary.ToLowerInvariant()}");
+
+        return inPrimary is > 0 && inSecondary is > 0
+            ? new MoneyFormat(primary, secondary, inSecondary.Value / inPrimary.Value)
+            : MoneyFormat.Single(primary);
+    }
+
     private string ApiBase => _config.Pool.ApiBase.TrimEnd('/');
 
     /// <summary>Pool stats back several screens at once, so one response is reused briefly.</summary>

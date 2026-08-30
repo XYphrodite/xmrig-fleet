@@ -24,6 +24,7 @@ public sealed class EconomicsScreen
         PoolNetworkStats? network = null;
         PoolWalletStats? wallet = null;
         double? price = null;
+        MoneyFormat money = MoneyFormat.Single(_config.Electricity.Currency);
 
         await AnsiConsole.Status().StartAsync("Collecting fleet and market data...", async _ =>
         {
@@ -36,6 +37,7 @@ public sealed class EconomicsScreen
             network = networkTask.Result;
             wallet = walletTask.Result;
             price = priceTask.Result;
+            money = await _market.GetMoneyFormatAsync(ct);
         });
 
         var currency = _config.Electricity.Currency;
@@ -51,7 +53,7 @@ public sealed class EconomicsScreen
             + (overrides > 0 ? $" [grey](default; {overrides} node(s) on their own tariff)[/]" : ""));
         summary.AddRow("[grey]XMR price[/]", price is null
             ? $"[yellow]no price available in {UiHelpers.Escape(currency)}[/]"
-            : $"{price:N2} {UiHelpers.Escape(currency)}");
+            : money.Markup(price));
         summary.AddRow("[grey]Network hashrate[/]", network?.NetworkHashrate is { } nh ? Economics.FormatHashrate(nh) : "[yellow]pool API unavailable[/]");
         AnsiConsole.Write(new Panel(summary).Header("[bold]Inputs[/]").Border(BoxBorder.Rounded).Expand());
 
@@ -68,9 +70,9 @@ public sealed class EconomicsScreen
             table.AddRow(
                 label,
                 economics.XmrPerDay is { } xmr ? $"{xmr * factor:0.00000}" : "[grey]-[/]",
-                UiHelpers.Money(economics.RevenuePerDay * factor, currency),
-                UiHelpers.Money(economics.CostPerDay * factor, currency),
-                UiHelpers.Signed(economics.ProfitPerDay * factor, currency));
+                money.Markup(economics.RevenuePerDay * factor),
+                money.Markup(economics.CostPerDay * factor),
+                money.Signed(economics.ProfitPerDay * factor));
         }
 
         AnsiConsole.Write(table);
@@ -78,7 +80,7 @@ public sealed class EconomicsScreen
         if (economics.CostPerXmr is { } costPerXmr)
         {
             AnsiConsole.MarkupLine(
-                $"[grey]Cost to mine 1 XMR:[/] {costPerXmr:N2} {UiHelpers.Escape(currency)}  " +
+                $"[grey]Cost to mine 1 XMR:[/] {money.Markup(costPerXmr)}  " +
                 $"[grey](break-even XMR price at current draw)[/]");
         }
 
@@ -111,14 +113,14 @@ public sealed class EconomicsScreen
                 new Markup(state.Node.PricePerKwh is { } own
                     ? $"{own:N2}"
                     : $"[grey]{_config.Electricity.PricePerKwh:N2}[/]"),
-                new Markup(UiHelpers.Money(cost, currency)),
-                new Markup(UiHelpers.Money(income, currency)),
-                new Markup(UiHelpers.Signed(income - cost, currency)));
+                new Markup(money.Markup(cost)),
+                new Markup(money.Markup(income)),
+                new Markup(money.Signed(income - cost)));
         }
 
         AnsiConsole.Write(breakdown);
 
-        RenderReconciliation(economics, wallet, price, currency);
+        RenderReconciliation(economics, wallet, price, currency, money);
 
         UiHelpers.Pause();
     }
@@ -128,7 +130,7 @@ public sealed class EconomicsScreen
     /// have to hold two screens in their head. A large gap is a signal worth chasing: a node
     /// mining to the wrong wallet, a miner submitting no shares, or simply pool variance.
     /// </summary>
-    private void RenderReconciliation(FleetEconomics economics, PoolWalletStats? wallet, double? price, string currency)
+    private void RenderReconciliation(FleetEconomics economics, PoolWalletStats? wallet, double? price, string currency, MoneyFormat money)
     {
         AnsiConsole.WriteLine();
 
@@ -136,12 +138,12 @@ public sealed class EconomicsScreen
         grid.AddRow(
             new Markup("[grey]Estimated per day[/]"),
             new Markup(economics.XmrPerDay is { } est ? $"{est:0.000000} XMR" : "[grey]-[/]"),
-            new Markup(UiHelpers.Money(economics.RevenuePerDay, currency)));
+            new Markup(money.Markup(economics.RevenuePerDay)));
         grid.AddRow(
             new Markup("[grey]Credited by the pool[/]"),
             new Markup(wallet?.CreditedTodayXmr is { } act ? $"{act:0.000000} XMR" : "[grey]-[/]"),
             new Markup(wallet?.CreditedTodayXmr is { } act2 && price is { } p
-                ? UiHelpers.Money(act2 * p, currency)
+                ? money.Markup(act2 * p)
                 : "[grey]-[/]"));
 
         if (economics.XmrPerDay is > 0 && wallet?.CreditedTodayXmr is { } credited)
