@@ -79,6 +79,19 @@ public sealed class AgentClient : IDisposable
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromMinutes(6));
         using var response = await _http.SendAsync(message, cts.Token);
+
+        // An agent from before this feature has no such route and answers 404 with an empty
+        // body. During a roll-out that is the normal case, not an error worth a stack trace,
+        // so it has to read as a plain instruction rather than crash the run.
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return new AgentUpdateResultDto(
+                false,
+                "this agent is too old to update itself - install it once by hand, then the console can do the rest",
+                null, null, false);
+
+        if (!response.IsSuccessStatusCode)
+            return new AgentUpdateResultDto(false, $"the agent returned HTTP {(int)response.StatusCode}", null, null, false);
+
         return await response.Content.ReadFromJsonAsync<AgentUpdateResultDto>(JsonOptions, cts.Token);
     }
 

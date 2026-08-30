@@ -184,7 +184,7 @@ public static class Cli
                     failures++;
                 }
             }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
             {
                 // The agent can drop the connection while swapping itself; that is not a failure
                 // on its own, so fall through to the same wait-and-verify path.
