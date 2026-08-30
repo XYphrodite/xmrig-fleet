@@ -53,9 +53,9 @@ Hand-written source only; excludes `bin`/`obj`, generated files, and documentati
 
 | Language | Files | Code lines |
 |----------|------:|-----------:|
-| C# (agent + console + contracts) | 22 | 2,960 |
-| PowerShell (`deploy/`) | 2 | 127 |
-| **Total** | **24** | **3,087** |
+| C# (agent + console + contracts) | 24 | 3,291 |
+| PowerShell (`deploy/`) | 4 | 321 |
+| **Total** | **28** | **3,612** |
 
 ---
 
@@ -170,6 +170,8 @@ install/push/logs), `NodesScreen` (discover/add/edit/test), `HardwareScreen`,
 | `Economics` | Electricity cost, expected income, per-node profit split |
 | `TailscaleService` | Parses `tailscale status --json` for node discovery |
 | `FleetConfig` | `fleet.json` load/save (override with `XMRIG_FLEET_CONFIG`) |
+| `UpdateService` | GitHub release lookup, streaming download, in-place file swap |
+| `Updater` | The `update` command, its progress bar, and the start-up "newer version" notice |
 
 ### 3. **XmrigFleet.Contracts**
 **Type**: Class library
@@ -266,6 +268,19 @@ dotnet run --project src/XmrigFleet.Console     # interactive TUI
 `100.64.0.0/10` **only**, and verifies the API answers. For Linux nodes,
 [deploy/xmrig-fleet-agent.service](deploy/xmrig-fleet-agent.service) is the systemd unit.
 
+### Installing the console
+
+```powershell
+irm https://raw.githubusercontent.com/XYphrodite/xmrig-fleet/master/deploy/install.ps1 | iex
+```
+
+Unpacks the newest release into `%LOCALAPPDATA%\Programs\xmrig-fleet` and puts it on PATH.
+No administrator rights: this is the operator machine, not a mining node. Afterwards the
+console updates itself with `xmrig-fleet update`.
+
+[deploy/release.ps1](deploy/release.ps1) builds, packages and publishes a release; the tag
+stamps the assembly version, which is what `update` compares against.
+
 ### One-shot commands
 
 ```bash
@@ -275,6 +290,8 @@ xmrig-fleet stop   [node ...]
 xmrig-fleet restart
 xmrig-fleet economics
 xmrig-fleet pool
+xmrig-fleet update [--check]    # --check reports and exits 1 without installing
+xmrig-fleet version
 ```
 
 ---
@@ -310,9 +327,13 @@ xmrig-fleet/
 │   │   ├── MarketService.cs       # Hashvault + price parsing
 │   │   ├── Economics.cs           # cost / income / profit maths
 │   │   ├── TailscaleService.cs    # tailnet discovery
+│   │   ├── UpdateService.cs       # release lookup, download, in-place file swap
+│   │   ├── Updater.cs             # the update command and its progress bar
 │   │   └── Cli.cs                 # one-shot commands
 │   └── XmrigFleet.Contracts/      # DTOs shared by both sides
 ├── deploy/
+│   ├── install.ps1                # one-line operator install (irm ... | iex)
+│   ├── release.ps1                # build, package and publish a GitHub release
 │   ├── publish.ps1                # self-contained publish for agent + console
 │   ├── install-agent.ps1          # service + firewall + verification on a node
 │   └── xmrig-fleet-agent.service  # systemd unit for Linux nodes
@@ -348,9 +369,15 @@ xmrig-fleet/
 - [x] One-shot CLI (`status`, `economics`, `pool`, `help`) with meaningful exit codes
 - [x] Clean solution build, zero warnings
 
+- [x] `start` / `stop` / `restart` against a real miner, with the operator's own pool,
+      wallet and arguments carried over; hashrate became readable (2.29 kH/s) because the
+      agent now owns the process and its API token
+- [x] A miner started by the agent survives the agent being killed — restarting or
+      updating the agent does not stop mining
+- [x] One-line install (`irm ... | iex`) from a published release, and self-update
+      1.1.1 -> 1.1.2 replacing the running executable
+
 ### Implemented, Not Yet Verified Live ⏳
-- [ ] `start` / `stop` / `restart` against a real miner — untested because an unrelated
-      XMRig was mining on the only available node and `stop` is fleet-wide by design
 - [ ] Interactive TUI rendering in a real terminal (the development session had
       redirected output; the console correctly refuses and prints CLI usage instead)
 - [ ] `install-agent.ps1` service registration and firewall scoping on a clean node
@@ -407,9 +434,10 @@ xmrig-fleet/
 
 ## Document Information
 
-**Document Version**: v1.0
+**Document Version**: v1.1
 **Last Updated**: 2026-08-30
-**Product Version**: 1.0.0
+**Product Version**: 1.1.2
 **Status**: Active
-**Repository**: `c:\Repos\xmrig-fleet` (branch `master`)
+**Repository**: `c:\Repos\xmrig-fleet` (branch `master`), published at
+[github.com/XYphrodite/xmrig-fleet](https://github.com/XYphrodite/xmrig-fleet)
 **Related docs**: [README.md](README.md) (operator guide, Russian)
