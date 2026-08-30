@@ -26,7 +26,23 @@ tailnet (`100.64.0.0/10`), и дополнительно защищён общи
 | Стоимость майнинга и планируемый доход | Economics |
 | Состояние hashvault и баланс кошелька | Pool & wallet |
 
-## Быстрый старт
+## Установка консоли
+
+Одной строкой, права администратора не нужны:
+
+```powershell
+irm https://raw.githubusercontent.com/XYphrodite/xmrig-fleet/master/deploy/install.ps1 | iex
+```
+
+Скачает последний релиз, распакует в `%LOCALAPPDATA%\Programs\xmrig-fleet` и пропишет PATH.
+Дальше консоль обновляет себя сама:
+
+```powershell
+xmrig-fleet update          # поставить свежий релиз
+xmrig-fleet update --check  # только проверить; код возврата 1, если есть новее
+```
+
+## Установка агентов на ноды
 
 ```powershell
 # 1. Собрать self-contained бинарники (нодам .NET ставить не нужно)
@@ -34,9 +50,6 @@ tailnet (`100.64.0.0/10`), и дополнительно защищён общи
 
 # 2. На каждой майнящей машине, из elevated PowerShell
 .\install-agent.ps1 -Token "ваш-общий-секрет" -SourcePath .\agent
-
-# 3. На управляющей машине
-.\publish\console\xmrig-fleet.exe
 ```
 
 В консоли: **Settings** → задать тот же токен, адрес кошелька, пул и цену киловатт-часа.
@@ -60,9 +73,9 @@ tailnet (`100.64.0.0/10`), и дополнительно защищён общи
     "wallet": "4..."
   },
   "nodes": [
-    { "name": "rig-1", "host": "100.119.48.15", "port": 47800, "enabled": true,
+    { "name": "rig-1", "host": "100.100.10.11", "port": 47800, "enabled": true,
       "powerFallbackWatts": 220 },
-    { "name": "rig-2", "host": "100.105.87.52", "port": 47800, "enabled": true,
+    { "name": "rig-2", "host": "100.100.10.12", "port": 47800, "enabled": true,
       "powerFallbackWatts": 310, "pricePerKwh": 7.2 }
   ]
 }
@@ -88,6 +101,8 @@ xmrig-fleet stop  [нода ...]
 xmrig-fleet restart
 xmrig-fleet economics
 xmrig-fleet pool
+xmrig-fleet update              # код возврата 2 при ошибке обновления
+xmrig-fleet version
 ```
 
 ## Что нужно знать про цифры

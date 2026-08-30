@@ -215,9 +215,9 @@ All routes live under `/api/v1` and require the `X-Fleet-Token` header.
     "wallet": "4..."
   },
   "nodes": [
-    { "name": "rig-1", "host": "100.119.48.15", "port": 47800,
+    { "name": "rig-1", "host": "100.100.10.11", "port": 47800,
       "enabled": true, "powerFallbackWatts": 220 },
-    { "name": "rig-2", "host": "100.105.87.52", "port": 47800,
+    { "name": "rig-2", "host": "100.100.10.12", "port": 47800,
       "enabled": true, "powerFallbackWatts": 310, "pricePerKwh": 7.2 }
   ]
 }
