@@ -147,7 +147,7 @@ hardware.
 
 | Class | Responsibility |
 |-------|----------------|
-| `MinerService` | Start/stop/restart XMRig, read `/2/summary` off the loopback API, keep the last 200 output lines |
+| `MinerService` | Start/stop/restart XMRig, read `/2/summary` and `/2/backends` off the loopback API, keep the last 200 output lines |
 | `HardwareService` | LibreHardwareMonitor sensors, power estimate, PawnIO diagnostics |
 | `InstallerService` | Resolve the right GitHub release asset, download, unpack, repoint the config |
 | `MinerConfigStore` | Durable per-node miner settings |
@@ -397,6 +397,10 @@ xmrig-fleet/
       updating the agent does not stop mining
 - [x] One-line install (`irm ... | iex`) from a published release, and self-update
       1.1.1 -> 1.1.2 replacing the running executable
+- [x] RandomX tuning state reported per node — huge-page allocation, mining thread count and
+      the MSR mod, read from `/2/summary` and `/2/backends`. Verified on `re-7lqd67ahcm0r`:
+      `1174/1174` pages, 6 threads on 12 MB L3, `msr=intel`. Huge pages decide RandomX
+      throughput far more than the CPU model does, and were previously invisible
 
 ### Implemented, Not Yet Verified Live ⏳
 - [ ] Interactive TUI rendering in a real terminal (the development session had
@@ -437,6 +441,10 @@ xmrig-fleet/
   and check `CodeIntegrity/Operational` event 3033 if a driver is blocked.
 - **Pushing pool settings does not restart the miner**; the operator must restart it for
   new settings to apply.
+- **A node that loses its huge pages runs several times slower with no other symptom.**
+  Measured on the Xeon E5-2680 v4: 5.97 kH/s at 100% allocation against 1.34 kH/s at 11%,
+  a 4.5x swing from memory fragmentation alone. The `Pages` column now exposes it; the
+  remedy is restarting the miner while RAM is free, which the operator must authorise.
 - **Test coverage is narrow.** [tests/](tests/) covers the markup, money and update-asset
   contracts that have actually broken; the agent, the pool parser and the HTTP layer are
   still verified only by hand against a live node.
