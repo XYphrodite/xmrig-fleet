@@ -53,9 +53,9 @@ Hand-written source only; excludes `bin`/`obj`, generated files, and documentati
 
 | Language | Files | Code lines |
 |----------|------:|-----------:|
-| C# (agent + console + contracts) | 22 | 2,848 |
+| C# (agent + console + contracts) | 22 | 2,916 |
 | PowerShell (`deploy/`) | 2 | 127 |
-| **Total** | **24** | **2,975** |
+| **Total** | **24** | **3,043** |
 
 ---
 
@@ -108,15 +108,19 @@ API enabled, so hashrate never has to be scraped from stdout.
    miners running is worse than useless.
 2. **Never present a guess as a measurement.** A missing or zero power sensor is
    reported as unmeasured, and the operator's `powerFallbackWatts` wins over the
-   agent's own estimate — that number usually comes from a wall meter.
-3. **Explain a blank cell.** When a sensor is absent the agent says why
+   agent's own estimate — that number usually comes from a wall meter. For the same
+   reason a price is left blank rather than fetched in a different currency.
+3. **Cost is per machine.** Electricity is summed node by node at each node's own
+   `pricePerKwh`, because rigs sit in different flats and tariff bands; one fleet
+   average would misprice every rig that is not on it. Currency stays fleet-wide.
+4. **Explain a blank cell.** When a sensor is absent the agent says why
    (`HardwareDto.SensorNotice`), probing the same registry value LibreHardwareMonitor
    itself reads, so the diagnostic cannot disagree with the library.
-4. **Installing must not interrupt mining.** `InstallerService` stops the miner only
+5. **Installing must not interrupt mining.** `InstallerService` stops the miner only
    when the target directory contains the executable that is currently running.
-5. **Every screen has a scriptable twin.** Anything worth watching in the TUI is also a
+6. **Every screen has a scriptable twin.** Anything worth watching in the TUI is also a
    one-shot command with a meaningful exit code, for Task Scheduler and cron.
-6. **Degrade, never crash.** Pool JSON is read field by field with tolerant fallbacks;
+7. **Degrade, never crash.** Pool JSON is read field by field with tolerant fallbacks;
    a renamed field blanks one cell instead of breaking a screen.
 
 ---
@@ -212,7 +216,9 @@ All routes live under `/api/v1` and require the `X-Fleet-Token` header.
   },
   "nodes": [
     { "name": "rig-1", "host": "100.119.48.15", "port": 47800,
-      "enabled": true, "powerFallbackWatts": 220 }
+      "enabled": true, "powerFallbackWatts": 220 },
+    { "name": "rig-2", "host": "100.105.87.52", "port": 47800,
+      "enabled": true, "powerFallbackWatts": 310, "pricePerKwh": 7.2 }
   ]
 }
 ```
@@ -331,6 +337,8 @@ xmrig-fleet/
       GitHub asset list; no cross-architecture fallback, so `linux/arm64` (which xmrig
       does not ship) fails with a message naming what was sought
 - [x] Hashvault parsing against live data — balance, payout threshold, paid total, network hashrate, XMR price in the configured currency
+- [x] Per-node electricity tariff: two nodes at 200 W on 5.00 and 12.00 RUB/kWh summed
+      to 81.60 RUB/day, not the 48.00 a single fleet rate would have produced
 - [x] Price falls back to the external feed only for currencies the pool omits, and is
       left blank rather than substituted: verified `GBP` via the feed and `KZT` blank
       (no source carries it)

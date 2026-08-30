@@ -56,7 +56,8 @@ public sealed class NodesScreen
         }
 
         var table = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey35)
-            .AddColumn("Name").AddColumn("Endpoint").AddColumn("Enabled").AddColumn("Miner path").AddColumn("Fallback W");
+            .AddColumn("Name").AddColumn("Endpoint").AddColumn("Enabled").AddColumn("Miner path")
+            .AddColumn("Fallback W").AddColumn($"{UiHelpers.Escape(_config.Electricity.Currency)}/kWh");
 
         foreach (var node in _config.Nodes)
         {
@@ -65,7 +66,8 @@ public sealed class NodesScreen
                 UiHelpers.Escape($"{node.Host}:{node.Port}"),
                 node.Enabled ? "[green]yes[/]" : "[grey]no[/]",
                 UiHelpers.Escape(node.MinerPath ?? "-"),
-                node.PowerFallbackWatts is { } w ? $"{w:0}" : "[grey]-[/]");
+                node.PowerFallbackWatts is { } w ? $"{w:0}" : "[grey]-[/]",
+                node.PricePerKwh is { } rate ? $"{rate:N2}" : $"[grey]{_config.Electricity.PricePerKwh:N2}[/]");
         }
 
         AnsiConsole.Write(table);
@@ -136,6 +138,10 @@ public sealed class NodesScreen
         var host = AnsiConsole.Ask<string>("Tailscale IP or MagicDNS name:");
         var port = AnsiConsole.Prompt(new TextPrompt<int>("Agent port:").DefaultValue(_config.AgentPort));
         var watts = AnsiConsole.Prompt(new TextPrompt<double>("Fallback watts (used when no power sensor):").DefaultValue(0d));
+        var rate = AnsiConsole.Prompt(new TextPrompt<double>(
+                $"Electricity at this machine, {UiHelpers.Escape(_config.Electricity.Currency)}/kWh " +
+                $"(0 = use the fleet default of {_config.Electricity.PricePerKwh:N2}):")
+            .DefaultValue(0d));
 
         _config.Nodes.Add(new NodeConfig
         {
@@ -143,6 +149,7 @@ public sealed class NodesScreen
             Host = host,
             Port = port,
             PowerFallbackWatts = watts > 0 ? watts : null,
+            PricePerKwh = rate > 0 ? rate : null,
         });
         _config.Save();
 
@@ -164,6 +171,12 @@ public sealed class NodesScreen
 
         var watts = AnsiConsole.Prompt(new TextPrompt<double>("Fallback watts (0 = none):").DefaultValue(node.PowerFallbackWatts ?? 0));
         node.PowerFallbackWatts = watts > 0 ? watts : null;
+
+        var rate = AnsiConsole.Prompt(new TextPrompt<double>(
+                $"Electricity at this machine, {UiHelpers.Escape(_config.Electricity.Currency)}/kWh " +
+                $"(0 = use the fleet default of {_config.Electricity.PricePerKwh:N2}):")
+            .DefaultValue(node.PricePerKwh ?? 0));
+        node.PricePerKwh = rate > 0 ? rate : null;
 
         node.Token = NullIfBlank(AnsiConsole.Prompt(
             new TextPrompt<string>("Token override (blank uses the fleet token):").AllowEmpty().DefaultValue(node.Token ?? "")));

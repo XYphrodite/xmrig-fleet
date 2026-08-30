@@ -32,7 +32,9 @@ public static class Economics
         // would be on anyway, so what mining costs is the draw while it runs.
         var watts = list.Where(n => n.Mining).Sum(n => n.PowerWatts);
 
-        var costPerDay = watts / 1000.0 * 24.0 * config.Electricity.PricePerKwh;
+        // Summed per node, not from the fleet total: each machine can sit on its own tariff,
+        // so one average rate would misprice every rig that is not on it.
+        var costPerDay = list.Where(n => n.Mining).Sum(n => DailyCost(n, config));
 
         double? xmrPerDay = null;
         if (network?.NetworkHashrate is > 0 && network.BlockRewardXmr is > 0 && hashrate > 0)
@@ -57,6 +59,10 @@ public static class Economics
             costPerXmr,
             config.Electricity.Currency);
     }
+
+    /// <summary>What one node costs to run for 24 hours at its own tariff.</summary>
+    public static double DailyCost(NodeState node, FleetConfig config) =>
+        node.PowerWatts / 1000.0 * 24.0 * config.PricePerKwhFor(node.Node);
 
     public static string FormatHashrate(double hashesPerSecond) => hashesPerSecond switch
     {

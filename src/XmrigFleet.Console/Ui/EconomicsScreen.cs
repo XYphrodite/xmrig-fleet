@@ -42,7 +42,10 @@ public sealed class EconomicsScreen
         summary.AddRow("[grey]Mining nodes[/]", $"{states.Count(s => s.Mining)} of {states.Count}");
         summary.AddRow("[grey]Fleet hashrate[/]", $"[aqua]{Economics.FormatHashrate(economics.TotalHashrate)}[/]");
         summary.AddRow("[grey]Power draw[/]", $"{economics.TotalWatts:0} W");
-        summary.AddRow("[grey]Electricity[/]", $"{_config.Electricity.PricePerKwh:N2} {UiHelpers.Escape(currency)} / kWh");
+        var overrides = _config.Nodes.Count(n => n.Enabled && n.PricePerKwh is not null);
+        summary.AddRow("[grey]Electricity[/]",
+            $"{_config.Electricity.PricePerKwh:N2} {UiHelpers.Escape(currency)} / kWh"
+            + (overrides > 0 ? $" [grey](default; {overrides} node(s) on their own tariff)[/]" : ""));
         summary.AddRow("[grey]XMR price[/]", price is null
             ? $"[yellow]no price available in {UiHelpers.Escape(currency)}[/]"
             : $"{price:N2} {UiHelpers.Escape(currency)}");
@@ -83,6 +86,7 @@ public sealed class EconomicsScreen
             .AddColumn(new TableColumn("Hashrate").RightAligned())
             .AddColumn(new TableColumn("Share").RightAligned())
             .AddColumn(new TableColumn("Watts").RightAligned())
+            .AddColumn(new TableColumn($"{UiHelpers.Escape(currency)}/kWh").RightAligned())
             .AddColumn(new TableColumn("Cost").RightAligned())
             .AddColumn(new TableColumn("Income").RightAligned())
             .AddColumn(new TableColumn("Profit").RightAligned());
@@ -92,7 +96,7 @@ public sealed class EconomicsScreen
             // Income is split by hashrate share, cost by actual draw: that is what makes
             // one node profitable and another not.
             var share = economics.TotalHashrate > 0 ? state.Hashrate / economics.TotalHashrate : 0;
-            var cost = state.PowerWatts / 1000.0 * 24.0 * _config.Electricity.PricePerKwh;
+            var cost = Economics.DailyCost(state, _config);
             var income = economics.RevenuePerDay * share;
 
             breakdown.AddRow(
@@ -100,6 +104,10 @@ public sealed class EconomicsScreen
                 new Markup(Economics.FormatHashrate(state.Hashrate)),
                 new Markup($"{share:P1}"),
                 new Markup($"{state.PowerWatts:0}"),
+                // A node on the fleet default is dimmed, so an overridden tariff stands out.
+                new Markup(state.Node.PricePerKwh is { } own
+                    ? $"{own:N2}"
+                    : $"[grey]{_config.Electricity.PricePerKwh:N2}[/]"),
                 new Markup(UiHelpers.Money(cost, currency)),
                 new Markup(UiHelpers.Money(income, currency)),
                 new Markup(UiHelpers.Signed(income - cost, currency)));

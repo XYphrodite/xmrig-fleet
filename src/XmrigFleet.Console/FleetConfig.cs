@@ -79,6 +79,9 @@ public sealed class FleetConfig
         Nodes.FirstOrDefault(n => n.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
     public string TokenFor(NodeConfig node) => string.IsNullOrWhiteSpace(node.Token) ? Token : node.Token;
+
+    /// <summary>The tariff that actually applies to a node: its own, else the fleet default.</summary>
+    public double PricePerKwhFor(NodeConfig node) => node.PricePerKwh ?? Electricity.PricePerKwh;
 }
 
 public sealed class NodeConfig
@@ -101,6 +104,14 @@ public sealed class NodeConfig
 
     /// <summary>Watts assumed when the node reports no power sensor.</summary>
     public double? PowerFallbackWatts { get; set; }
+
+    /// <summary>
+    /// Electricity tariff at this machine, when it differs from the fleet default — rigs
+    /// often sit in different flats, regions or tariff bands. Null uses
+    /// <see cref="ElectricityConfig.PricePerKwh"/>. The currency stays fleet-wide, because
+    /// totals across nodes are only meaningful in one currency.
+    /// </summary>
+    public double? PricePerKwh { get; set; }
 
     public string Endpoint => $"http://{Host}:{Port}";
 
