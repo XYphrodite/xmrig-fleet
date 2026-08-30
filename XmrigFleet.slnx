@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/XmrigFleet.Agent/XmrigFleet.Agent.csproj" />
+    <Project Path="src/XmrigFleet.Console/XmrigFleet.Console.csproj" />
+    <Project Path="src/XmrigFleet.Contracts/XmrigFleet.Contracts.csproj" />
+  </Folder>
+</Solution>

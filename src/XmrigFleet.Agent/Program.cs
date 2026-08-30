@@ -1,0 +1,119 @@
+using System.Diagnostics;
+using System.Reflection;
+using System.Security.Cryptography;
+using Microsoft.Extensions.Options;
+using XmrigFleet.Agent;
+using XmrigFleet.Contracts;
+
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    // Without this a `dotnet run` agent defaults to Development and answers errors with a
+    // full stack trace, which would be served to anything on the tailnet that can reach it.
+    EnvironmentName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? Environments.Production,
+});
+var basePath = AppContext.BaseDirectory;
+
+// Lets the same binary run in the foreground for debugging and as a service on a node.
+// Both calls are no-ops when the process was not started by the respective service manager.
+builder.Host.UseWindowsService(options => options.ServiceName = "xmrig-fleet-agent");
+builder.Host.UseSystemd();
+
+builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection("Agent"));
+builder.Services.AddSingleton(new MinerConfigStore(basePath));
+builder.Services.AddSingleton<MinerService>();
+builder.Services.AddSingleton<HardwareService>();
+builder.Services.AddSingleton<InstallerService>();
+builder.Services.AddHttpClient("github", client =>
+{
+    // The GitHub API rejects requests without a User-Agent.
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("xmrig-fleet-agent");
+    client.Timeout = TimeSpan.FromMinutes(5);
+});
+
+var options = builder.Configuration.GetSection("Agent").Get<AgentOptions>() ?? new AgentOptions();
+builder.WebHost.UseUrls(options.ListenUrl);
+
+var app = builder.Build();
+var startedAt = Stopwatch.GetTimestamp();
+var agentVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
+
+if (string.IsNullOrWhiteSpace(options.Token))
+{
+    app.Logger.LogWarning(
+        "Agent:Token is empty - every host that can reach {Url} may control this miner. Set a token in appsettings.json.",
+        options.ListenUrl);
+}
+
+// Shared-secret auth. Tailscale already restricts who can reach this port; the token
+// stops anything else on the tailnet (or the LAN) from driving the miner.
+app.Use(async (context, next) =>
+{
+    var configured = context.RequestServices.GetRequiredService<IOptions<AgentOptions>>().Value.Token;
+    if (!string.IsNullOrWhiteSpace(configured))
+    {
+        var presented = context.Request.Headers["X-Fleet-Token"].ToString();
+        if (!FixedTimeEquals(presented, configured))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsJsonAsync(CommandResultDto.Failure("Invalid or missing X-Fleet-Token."));
+            return;
+        }
+    }
+    await next();
+});
+
+var api = app.MapGroup("/api/v1");
+
+api.MapGet("/info", () => Info());
+
+api.MapGet("/status", async (MinerService miner, HardwareService hw, CancellationToken ct) =>
+{
+    // Sensors and the miner API are independent, so read them together.
+    var minerTask = miner.GetStatusAsync(ct);
+    var hardwareTask = hw.ReadAsync(ct);
+    await Task.WhenAll(minerTask, hardwareTask);
+    return new NodeSnapshotDto(Info(), minerTask.Result, hardwareTask.Result);
+});
+
+api.MapGet("/miner", (MinerService miner, CancellationToken ct) => miner.GetStatusAsync(ct));
+api.MapPost("/miner/start", (MinerService miner, CancellationToken ct) => miner.StartAsync(ct));
+api.MapPost("/miner/stop", (MinerService miner, CancellationToken ct) => miner.StopAsync(ct));
+api.MapPost("/miner/restart", (MinerService miner, CancellationToken ct) => miner.RestartAsync(ct));
+
+api.MapGet("/hardware", (HardwareService hw, CancellationToken ct) => hw.ReadAsync(ct));
+
+api.MapGet("/config", (MinerConfigStore store) => store.Current);
+api.MapPut("/config", (MinerConfigDto patch, MinerConfigStore store) => store.Update(patch));
+
+api.MapPost("/install", (InstallRequestDto request, InstallerService installer, CancellationToken ct) =>
+    installer.InstallAsync(request, ct));
+
+api.MapGet("/logs", (MinerService miner) => new LogTailDto("xmrig", miner.RecentOutput));
+
+app.Logger.LogInformation("xmrig-fleet agent {Version} listening on {Url}", agentVersion, options.ListenUrl);
+
+if (options.AutoStartMiner)
+{
+    var autoMiner = app.Services.GetRequiredService<MinerService>();
+    var autoResult = await autoMiner.StartAsync(CancellationToken.None);
+    app.Logger.LogInformation("Autostart: {Message}", autoResult.Message);
+}
+
+app.Run();
+return;
+
+AgentInfoDto Info() => new(
+    Environment.MachineName,
+    Environment.OSVersion.VersionString,
+    agentVersion,
+    ApiVersion.Current,
+    Stopwatch.GetElapsedTime(startedAt).TotalSeconds,
+    HardwareService.IsElevated());
+
+static bool FixedTimeEquals(string a, string b)
+{
+    var left = System.Text.Encoding.UTF8.GetBytes(a);
+    var right = System.Text.Encoding.UTF8.GetBytes(b);
+    return left.Length == right.Length && CryptographicOperations.FixedTimeEquals(left, right);
+}

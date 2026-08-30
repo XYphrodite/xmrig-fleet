@@ -1,0 +1,10 @@
+bin/
+obj/
+publish/
+
+# Local fleet state: holds the shared token and wallet address.
+fleet.json
+miner.json
+
+.vs/
+*.user
