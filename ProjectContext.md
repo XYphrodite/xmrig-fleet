@@ -12,10 +12,6 @@ prices the electricity it burns, and reads the pool balance from Hashvault.
 **Language**: C# 12
 **Domain**: Cryptocurrency mining operations / fleet telemetry and control
 
-> **Scope note**: This repository is deliberately **outside** the `Reborn` / ClubCore
-> workspace at `c:\Repos\Reborn`. It shares no code, no backend, and no release process
-> with that product — only the operator and the tailnet.
-
 ---
 
 ## Technical Stack
@@ -346,6 +342,9 @@ xmrig-fleet/
 - [ ] Whether installing PawnIO actually restores CPU temperature and package power
 
 ### Planned 📋
+- [ ] **Bring CPU temperature and package power online**: install PawnIO on one node,
+      confirm the sensors appear, then roll it out fleet-wide and drop the
+      `powerFallbackWatts` workaround where real readings exist
 - [ ] Hashrate history with a sparkline per node
 - [ ] Alerting: node offline, miner dead, temperature over threshold
 - [ ] Compare estimated income against Hashvault `dailyCredited` on one screen
@@ -392,6 +391,4 @@ xmrig-fleet/
 **Product Version**: 1.0.0
 **Status**: Active
 **Repository**: `c:\Repos\xmrig-fleet` (branch `master`)
-**Authoring style**: per
-[Reborn/desktop-client/ProjectContext_UserRules.md](../Reborn/desktop-client/ProjectContext_UserRules.md)
 **Related docs**: [README.md](README.md) (operator guide, Russian)
