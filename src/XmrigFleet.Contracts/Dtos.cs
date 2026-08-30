@@ -59,6 +59,9 @@ public sealed record HardwareDto
     /// <summary>Best-effort whole-machine draw. Falls back to the node's configured estimate when no sensor exists.</summary>
     public double? EstimatedPowerWatts { get; init; }
     public bool PowerIsMeasured { get; init; }
+
+    /// <summary>Explains why sensors are missing when the agent can tell, e.g. a blocked ring0 driver.</summary>
+    public string? SensorNotice { get; init; }
 }
 
 public sealed record NodeSnapshotDto(AgentInfoDto Agent, MinerStatusDto Miner, HardwareDto Hardware);

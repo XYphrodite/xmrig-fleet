@@ -87,9 +87,12 @@ public sealed class HardwareScreen
         var powers = hw.Sensors.Where(s => s.Kind == "Power").ToList();
         var fans = hw.Sensors.Where(s => s.Kind == "Fan").ToList();
 
+        if (hw.SensorNotice is { Length: > 0 } notice)
+            AnsiConsole.MarkupLine($"[yellow]{UiHelpers.Escape(notice)}[/]");
+
         if (temps.Count + powers.Count + fans.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]No sensors reported.[/] On Windows most temperature and power sensors need the agent to run elevated.");
+            AnsiConsole.MarkupLine("[yellow]No sensors reported.[/]");
             return;
         }
 

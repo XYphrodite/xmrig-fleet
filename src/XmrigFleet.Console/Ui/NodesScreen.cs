@@ -216,6 +216,8 @@ public sealed class NodesScreen
                 UiHelpers.Result(true, $"{state.Node.Name}: agent {info.AgentVersion} on {info.Hostname}, {elevated}");
                 if (info.ApiVersion != ApiVersion.Current)
                     AnsiConsole.MarkupLine($"  [yellow]API version mismatch: agent {UiHelpers.Escape(info.ApiVersion)}, console {ApiVersion.Current}[/]");
+                if (state.Snapshot.Hardware.SensorNotice is { Length: > 0 } notice)
+                    AnsiConsole.MarkupLine($"  [yellow]{UiHelpers.Escape(notice)}[/]");
             }
             else
             {

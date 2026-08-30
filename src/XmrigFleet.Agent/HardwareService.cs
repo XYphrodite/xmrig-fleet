@@ -143,7 +143,50 @@ public sealed class HardwareService : IDisposable
             Sensors = sensors,
             EstimatedPowerWatts = power is null ? null : Math.Round(power.Value, 1),
             PowerIsMeasured = measured,
+            SensorNotice = DescribeMissingCpuSensors(cpuTemp, cpuPower),
         };
+    }
+
+    /// <summary>
+    /// CPU temperature and package power come from model-specific registers, which need the
+    /// WinRing0 kernel driver. That driver is on the Microsoft vulnerable-driver blocklist,
+    /// so Memory Integrity (HVCI) refuses to load it and every MSR reader on the machine goes
+    /// blank - LibreHardwareMonitor here, and equally the xmrig MSR mod. GPU sensors are
+    /// unaffected because they come from the vendor user-mode API.
+    ///
+    /// Saying so beats leaving an operator to guess why one column is empty.
+    /// </summary>
+    private static string? DescribeMissingCpuSensors(double? cpuTemp, double? cpuPower)
+    {
+        if (cpuTemp is not null && cpuPower is > 0) return null;
+        if (!OperatingSystem.IsWindows()) return null;
+
+        if (IsMemoryIntegrityEnabled())
+        {
+            return "Memory Integrity (HVCI) is on, so the ring0 driver that reads CPU temperature "
+                 + "and package power cannot load. The xmrig MSR mod is disabled by the same block, "
+                 + "which costs RandomX hashrate. Set powerFallbackWatts for this node, or turn "
+                 + "Memory Integrity off on a dedicated rig.";
+        }
+
+        return IsElevated()
+            ? "CPU temperature and power sensors are unavailable on this machine."
+            : "The agent is not elevated, so CPU temperature and power sensors stay blank.";
+    }
+
+    private static bool IsMemoryIntegrityEnabled()
+    {
+        if (!OperatingSystem.IsWindows()) return false;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity");
+            return key?.GetValue("Enabled") is int enabled && enabled == 1;
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            return false;
+        }
     }
 
     /// <summary>Board, RAM, drives, fans and PSU losses that no CPU/GPU sensor accounts for.</summary>
