@@ -44,12 +44,25 @@ xmrig-fleet update --check  # только проверить; код возвр
 
 ## Установка агентов на ноды
 
-```powershell
-# 1. Собрать self-contained бинарники (нодам .NET ставить не нужно)
-.\deploy\publish.ps1
+На каждой майнящей машине, из PowerShell **от администратора**:
 
-# 2. На каждой майнящей машине, из elevated PowerShell
-.\install-agent.ps1 -Token "ваш-общий-секрет" -SourcePath .\agent
+```powershell
+$env:XMRIG_FLEET_TOKEN = 'ваш-общий-секрет'
+irm https://raw.githubusercontent.com/XYphrodite/xmrig-fleet/master/deploy/install-agent.ps1 | iex
+```
+
+Скрипт сам скачает агента из последнего релиза, поставит службу с автозапуском и
+перезапуском при сбое, откроет порт **только** для диапазона tailnet и проверит, что API
+отвечает.
+
+Именно `irm ... | iex`, а не скачивание файла: запуск скачанного `.ps1` блокируется
+политикой выполнения, а конвейер под неё не подпадает.
+
+Если нужно поставить из своей сборки, а не из релиза:
+
+```powershell
+.\deploy\publish.ps1
+.\deploy\install-agent.ps1 -Token "ваш-общий-секрет" -SourcePath .\publish\agent
 ```
 
 В консоли: **Settings** → задать тот же токен, адрес кошелька, пул и цену киловатт-часа.

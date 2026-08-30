@@ -10,17 +10,26 @@
     Run this in an elevated PowerShell on the node. The agent needs Administrator to read
     temperature and power sensors and to control the miner process.
 
+    Can also be run straight from the web, which avoids the execution policy that blocks a
+    downloaded .ps1 file:
+
+        $env:XMRIG_FLEET_TOKEN = '<fleet token>'
+        irm https://raw.githubusercontent.com/XYphrodite/xmrig-fleet/master/deploy/install-agent.ps1 | iex
+
+    In that form the agent payload is downloaded from the newest release automatically.
+
 .EXAMPLE
     .\install-agent.ps1 -Token "my-fleet-secret" -SourcePath .\publish
 #>
 [CmdletBinding()]
 param(
-    # Shared secret, must match "token" in the console's fleet.json.
-    [Parameter(Mandatory = $true)]
-    [string]$Token,
+    # Shared secret, must match "token" in the console's fleet.json. Falls back to
+    # $env:XMRIG_FLEET_TOKEN so the script also works when piped to iex, which cannot
+    # pass arguments.
+    [string]$Token = $env:XMRIG_FLEET_TOKEN,
 
-    # Folder holding the published agent (dotnet publish output).
-    [string]$SourcePath = "$PSScriptRoot\..\publish\agent",
+    # Folder holding the published agent. Empty means: fetch the newest release.
+    [string]$SourcePath = '',
 
     [string]$InstallPath = 'C:\Program Files\xmrig-fleet-agent',
 
@@ -38,11 +47,35 @@ if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
     throw 'Run this script from an elevated PowerShell.'
 }
 
-if (-not (Test-Path $SourcePath)) {
-    throw "Published agent not found at $SourcePath. Run deploy\publish.ps1 first."
+if ([string]::IsNullOrWhiteSpace($Token)) {
+    throw 'No fleet token. Pass -Token, or set $env:XMRIG_FLEET_TOKEN before piping this script to iex.'
 }
 
 $exeName = 'xmrig-fleet-agent.exe'
+
+# No payload given: pull the agent for this platform out of the newest release.
+if ([string]::IsNullOrWhiteSpace($SourcePath)) {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $repo = if ($env:XMRIG_FLEET_REPO) { $env:XMRIG_FLEET_REPO } else { 'XYphrodite/xmrig-fleet' }
+    $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') { 'arm64' } else { 'x64' }
+    $assetName = "xmrig-fleet-agent-win-$arch.zip"
+
+    Write-Host "==> Fetching $assetName from the newest release of $repo"
+    $release = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'xmrig-fleet-agent-installer' } -TimeoutSec 30
+    $asset = $release.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+    if (-not $asset) { throw "Release $($release.tag_name) carries no $assetName." }
+
+    $archive = Join-Path ([IO.Path]::GetTempPath()) "xmrig-fleet-agent-$([guid]::NewGuid().ToString('N')).zip"
+    $SourcePath = Join-Path ([IO.Path]::GetTempPath()) "xmrig-fleet-agent-$([guid]::NewGuid().ToString('N'))"
+    Invoke-WebRequest $asset.browser_download_url -OutFile $archive -UseBasicParsing
+    Expand-Archive $archive $SourcePath -Force
+    Remove-Item $archive -Force -ErrorAction SilentlyContinue
+    Write-Host "    $($release.tag_name) unpacked"
+}
+
+if (-not (Test-Path $SourcePath)) {
+    throw "Published agent not found at $SourcePath. Run deploy\publish.ps1 first, or omit -SourcePath to download a release."
+}
 if (-not (Test-Path (Join-Path $SourcePath $exeName))) {
     throw "$exeName is missing from $SourcePath."
 }
