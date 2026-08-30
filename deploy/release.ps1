@@ -34,15 +34,19 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$root = Resolve-Path "$PSScriptRoot\.."
+$root = (Resolve-Path "$PSScriptRoot\..").Path
 $number = $Version.TrimStart('v')
 
-# A running agent or console locks its own executable and fails the build.
+# A running agent or console locks its own executable and fails the build. Only processes
+# started out of this repository can lock the build output, so an installed agent service
+# on this machine is deliberately left alone: killing it would stop a production node.
 foreach ($name in 'xmrig-fleet-agent', 'xmrig-fleet') {
-    Get-Process $name -ErrorAction SilentlyContinue | ForEach-Object {
-        Write-Host "Stopping running $name (pid $($_.Id)) so its files can be replaced" -ForegroundColor Yellow
-        Stop-Process -Id $_.Id -Force
-    }
+    Get-Process $name -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } |
+        ForEach-Object {
+            Write-Host "Stopping $name (pid $($_.Id)) from the working tree so its files can be replaced" -ForegroundColor Yellow
+            Stop-Process -Id $_.Id -Force
+        }
 }
 
 if (Test-Path $OutputPath) { Remove-Item $OutputPath -Recurse -Force }
