@@ -82,6 +82,9 @@ public sealed class Dashboard
             .AddColumn("Node")
             .AddColumn("State")
             .AddColumn(new TableColumn("Hashrate").RightAligned())
+            .AddColumn(new TableColumn("Thr").RightAligned())
+            .AddColumn(new TableColumn("Pages").RightAligned())
+            .AddColumn(new TableColumn("MSR").RightAligned())
             .AddColumn(new TableColumn("CPU").RightAligned())
             .AddColumn(new TableColumn("Temp").RightAligned())
             .AddColumn(new TableColumn("Watts").RightAligned())
@@ -97,6 +100,9 @@ public sealed class Dashboard
                 new Markup($"[bold]{UiHelpers.Escape(state.Node.Name)}[/]\n[grey]{UiHelpers.Escape(state.Node.Host)}[/]"),
                 new Markup(UiHelpers.StatusBadge(state)),
                 new Markup(state.Hashrate > 0 ? $"[aqua]{Economics.FormatHashrate(state.Hashrate)}[/]" : "[grey]-[/]"),
+                new Markup(miner?.MiningThreads is { } thr ? $"{thr}" : "[grey]-[/]"),
+                new Markup(UiHelpers.HugePages(miner)),
+                new Markup(UiHelpers.MsrBadge(miner)),
                 new Markup(hardware?.CpuLoadPercent is { } load ? $"{load:0}%" : "[grey]-[/]"),
                 new Markup(UiHelpers.Temperature(hardware?.CpuTemperatureC ?? hardware?.Gpus.FirstOrDefault()?.TemperatureC)),
                 new Markup(state.PowerWatts > 0

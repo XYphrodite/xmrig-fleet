@@ -194,7 +194,11 @@ public sealed class MinerService : IDisposable
 
             await using var stream = await response.Content.ReadAsStreamAsync(ct);
             using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-            return Merge(status, doc.RootElement);
+            status = Merge(status, doc.RootElement);
+
+            // Thread count lives on the backend, not the summary: summary's cpu.threads is the
+            // logical CPU count, which is not what RandomX is running with.
+            return await MergeBackendsAsync(status, ct);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
@@ -220,6 +224,7 @@ public sealed class MinerService : IDisposable
             hr.TryGetProperty("highest", out highest);
         }
         root.TryGetProperty("connection", out var conn);
+        root.TryGetProperty("cpu", out var cpu);
 
         return status with
         {
@@ -237,7 +242,52 @@ public sealed class MinerService : IDisposable
                 ? ping.GetDouble()
                 : null,
             PoolUrl = ReadString(conn, "pool") ?? status.PoolUrl,
+            HugePagesAllocated = HugePage(root, 0),
+            HugePagesTotal = HugePage(root, 1),
+            MsrMod = ReadString(cpu, "msr") is { } msr && msr is not ("none" or "unavailable") ? msr : null,
+            Assembly = ReadString(cpu, "assembly") is { } asm && asm != "none" ? asm : null,
         };
+    }
+
+    /// <summary>xmrig reports huge pages as a two-element [allocated, requested] array.</summary>
+    private static int? HugePage(JsonElement root, int index) =>
+        root.TryGetProperty("hugepages", out var hp)
+        && hp.ValueKind == JsonValueKind.Array
+        && hp.GetArrayLength() > index
+        && hp[index].ValueKind == JsonValueKind.Number
+            ? hp[index].GetInt32()
+            : null;
+
+    /// <summary>
+    /// Reads the CPU backend for the real mining thread count. A failure here must not blank the
+    /// status the summary already produced, so every problem falls through to the unchanged value.
+    /// </summary>
+    private async Task<MinerStatusDto> MergeBackendsAsync(MinerStatusDto status, CancellationToken ct)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{_options.XmrigApiPort}/2/backends");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiToken);
+            using var response = await _http.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode) return status;
+
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array) return status;
+
+            foreach (var backend in doc.RootElement.EnumerateArray())
+            {
+                if (ReadString(backend, "type") != "cpu") continue;
+                if (!backend.TryGetProperty("threads", out var threads) || threads.ValueKind != JsonValueKind.Array) continue;
+                return status with { MiningThreads = threads.GetArrayLength() };
+            }
+
+            return status;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            return status;
+        }
     }
 
     private static string? ReadString(JsonElement element, string name) =>

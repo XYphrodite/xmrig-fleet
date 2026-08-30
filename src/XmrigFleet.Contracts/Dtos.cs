@@ -37,6 +37,25 @@ public sealed record MinerStatusDto
     public double? PingMs { get; init; }
     /// <summary>Set when the agent could not reach the xmrig HTTP API even though the process is alive.</summary>
     public string? ApiError { get; init; }
+
+    // RandomX throughput is decided almost entirely by these, not by CPU model: a node that
+    // fails to get its huge pages runs several times slower with no other symptom. Reporting
+    // them turns "why is this node slow" from guesswork into a reading.
+
+    /// <summary>Huge pages xmrig actually obtained for the RandomX dataset and caches.</summary>
+    public int? HugePagesAllocated { get; init; }
+    /// <summary>Huge pages xmrig asked for. Equal to <see cref="HugePagesAllocated"/> on a healthy node.</summary>
+    public int? HugePagesTotal { get; init; }
+    /// <summary>Threads the CPU backend is actually mining with (not the logical CPU count).</summary>
+    public int? MiningThreads { get; init; }
+    /// <summary>xmrig's MSR mod state, e.g. "intel", "ryzen_19h", or null when it could not be applied.</summary>
+    public string? MsrMod { get; init; }
+    /// <summary>Assembly optimisation xmrig selected, e.g. "intel", "ryzen".</summary>
+    public string? Assembly { get; init; }
+
+    /// <summary>Fraction of requested huge pages that were granted, or null when unknown.</summary>
+    public double? HugePagesPercent =>
+        HugePagesTotal is > 0 && HugePagesAllocated is { } got ? (double)got / HugePagesTotal.Value : null;
 }
 
 public sealed record SensorDto(string Component, string Name, string Kind, double Value, string Unit);

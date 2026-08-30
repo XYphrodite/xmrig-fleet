@@ -46,6 +46,27 @@ public static class UiHelpers
         _ => "[grey]idle[/]",
     };
 
+    /// <summary>
+    /// Huge-page allocation, which on RandomX is worth several times more than the CPU model.
+    /// Anything short of 100% is a node leaving hashrate on the table, so only a full grant is
+    /// green. Shown as the raw fraction too: 1174/1174 tells the operator the dataset size.
+    /// </summary>
+    public static string HugePages(XmrigFleet.Contracts.MinerStatusDto? miner)
+    {
+        if (miner is not { Running: true }) return "[grey]-[/]";
+        if (miner.HugePagesPercent is not { } fraction) return "[grey]?[/]";
+
+        var colour = fraction switch { >= 1 => "green", >= 0.5 => "yellow", _ => "red" };
+        return $"[{colour}]{fraction:P0}[/]";
+    }
+
+    /// <summary>The MSR mod is worth roughly 5-15% on RandomX and silently absent without admin.</summary>
+    public static string MsrBadge(XmrigFleet.Contracts.MinerStatusDto? miner)
+    {
+        if (miner is not { Running: true }) return "[grey]-[/]";
+        return miner.MsrMod is { } msr ? $"[green]{Escape(msr)}[/]" : "[red]no[/]";
+    }
+
     public static string Money(double? amount, string currency) =>
         amount is null ? "[grey]-[/]" : $"{amount.Value:N2} {Escape(currency)}";
 

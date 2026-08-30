@@ -84,6 +84,7 @@ public static class Cli
         var table = new Table().Border(TableBorder.Rounded)
             .AddColumn("Node").AddColumn("State")
             .AddColumn(new TableColumn("Hashrate").RightAligned())
+            .AddColumn(new TableColumn("Pages").RightAligned())
             .AddColumn(new TableColumn("Temp").RightAligned())
             .AddColumn(new TableColumn("Watts").RightAligned())
             .AddColumn(new TableColumn("Uptime").RightAligned());
@@ -94,6 +95,7 @@ public static class Cli
                 new Markup(UiHelpers.Escape(state.Node.Name)),
                 new Markup(UiHelpers.StatusBadge(state)),
                 new Markup(state.Hashrate > 0 ? Economics.FormatHashrate(state.Hashrate) : "[grey]-[/]"),
+                new Markup(UiHelpers.HugePages(state.Snapshot?.Miner)),
                 new Markup(UiHelpers.Temperature(state.Snapshot?.Hardware.CpuTemperatureC ?? state.Snapshot?.Hardware.Gpus.FirstOrDefault()?.TemperatureC)),
                 new Markup(state.PowerWatts > 0 ? $"{state.PowerWatts:0}" : "[grey]-[/]"),
                 new Markup(state.Snapshot?.Miner is { Running: true } m ? Economics.FormatDuration(m.UptimeSeconds) : "[grey]-[/]"));
