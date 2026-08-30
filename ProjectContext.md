@@ -25,7 +25,7 @@ prices the electricity it burns, and reads the pool balance from Hashvault.
 | Shared contracts | .NET 8 class library | DTOs referenced by both sides |
 | Transport | Plain HTTP over the tailnet | Shared-secret header, no TLS (see **Security Model**) |
 | Service hosting | Windows Service / systemd | Same binary, both hosts registered unconditionally |
-| Miner telemetry | XMRig HTTP API on loopback | Agent starts XMRig with a per-process random token |
+| Miner telemetry | XMRig HTTP API on loopback | Agent starts XMRig with a bearer token kept in `xmrig-api.token` |
 
 ### Key Dependencies
 
@@ -420,8 +420,8 @@ xmrig-fleet/
 - **`stop` kills every `xmrig` process on the node**, including one an operator started
   by hand. Deliberate, but destructive if a node is shared.
 - **Hashrate is unreadable for a miner the agent did not start** — it holds its own API
-  token. The console shows `mining (no api)` until the miner is restarted through the
-  fleet.
+  token, and only a miner this agent launched can be read. The console shows `mining (no api)`
+  until the miner is restarted through the fleet.
 - **Income is an expectation, not a payout.** It reduces to
   `hashrate × 86400 × blockReward / difficulty`, extrapolating the hashrate measured right
   now across a whole day. **Economics** now shows it next to the pool's `dailyCredited`
