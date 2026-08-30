@@ -30,7 +30,8 @@ public sealed class MinerService : IDisposable
         _config = config;
         _options = options.Value;
         _log = log;
-        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+        // The miner API is on loopback; a system proxy must never intercept it.
+        _http = new HttpClient(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(3) };
         _apiToken = config.GetOrCreateApiToken();
     }
 

@@ -14,7 +14,11 @@ public sealed class AgentClient : IDisposable
     public AgentClient(NodeConfig node, string token, TimeSpan? timeout = null)
     {
         Node = node;
-        _http = new HttpClient
+        // Agents live on private tailnet addresses, so a system proxy has no business in the
+        // middle. Without this, a machine running a local VPN/proxy client sends fleet traffic
+        // into it and every node comes back as an HTTP error that looks like the agent's fault.
+        var handler = new HttpClientHandler { UseProxy = false };
+        _http = new HttpClient(handler)
         {
             BaseAddress = new Uri($"{node.Endpoint}/api/v1/"),
             Timeout = timeout ?? TimeSpan.FromSeconds(8),
