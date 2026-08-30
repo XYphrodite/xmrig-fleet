@@ -8,3 +8,6 @@ miner.json
 
 .vs/
 *.user
+
+# Release staging produced by deploy/release.ps1
+release/

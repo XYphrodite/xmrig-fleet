@@ -31,6 +31,9 @@ The canonical project overview is auto-loaded via the import below. Keep it curr
   executable and `dotnet build` fails with `MSB3021` / `MSB3027`.
 - `fleet.json` (console) and `miner.json` (agent) hold the fleet token and wallet
   address. Both are gitignored — never commit them or paste their contents.
+- The tracked `src/XmrigFleet.Agent/appsettings.json` is a **template**: its token must
+  stay the `CHANGE-ME` placeholder. Real tokens are written on the node by
+  `install-agent.ps1`, never committed here.
 - The agent needs Administrator/root for sensors and for killing another user's miner.
   CPU temperature and package power additionally require PawnIO on the node; without it
   those sensors are absent, and the node falls back to `powerFallbackWatts`.

@@ -19,6 +19,9 @@ catch (InvalidOperationException ex)
 // First run: leave a config on disk so the file can be edited by hand too.
 if (!File.Exists(config.Path)) config.Save();
 
+// Remove whatever the previous self-update displaced.
+UpdateService.CleanUpPreviousUpdate();
+
 using var cts = new CancellationTokenSource();
 System.Console.CancelKeyPress += (_, e) =>
 {
@@ -49,6 +52,8 @@ var hardware = new HardwareScreen(config, fleet);
 var economics = new EconomicsScreen(config, fleet, market);
 var pool = new PoolScreen(config, market);
 var settings = new SettingsScreen(config);
+
+await Updater.NotifyIfOutdatedAsync(config, cts.Token);
 
 try
 {

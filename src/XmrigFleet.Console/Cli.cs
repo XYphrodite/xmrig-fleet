@@ -20,6 +20,8 @@ public static class Cli
           restart        restart mining
           economics      cost, income and profit summary
           pool           pool and wallet balance
+          update         download and install a newer xmrig-fleet
+          version        print the running version
           help           this text
 
         Commands that take nodes act on every enabled node when none are named.
@@ -50,6 +52,13 @@ public static class Cli
 
             case "pool":
                 await new PoolReport(config, market).WriteAsync(ct);
+                return 0;
+
+            case "update":
+                return await Updater.RunAsync(config, names.Contains("--check") || names.Contains("check"), ct);
+
+            case "version" or "--version" or "v":
+                AnsiConsole.WriteLine($"xmrig-fleet {UpdateService.CurrentVersion}");
                 return 0;
 
             case "help" or "h" or "?":

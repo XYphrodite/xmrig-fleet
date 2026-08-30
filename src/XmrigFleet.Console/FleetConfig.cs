@@ -27,6 +27,8 @@ public sealed class FleetConfig
     /// </summary>
     public string PriceApiUrl { get; set; } = "https://api.coingecko.com/api/v3/simple/price?ids=monero&vs_currencies={currency}";
 
+    public UpdateConfig Update { get; set; } = new();
+
     public List<NodeConfig> Nodes { get; set; } = [];
 
     [JsonIgnore]
@@ -116,6 +118,18 @@ public sealed class NodeConfig
     public string Endpoint => $"http://{Host}:{Port}";
 
     public override string ToString() => $"{Name} ({Host}:{Port})";
+}
+
+public sealed class UpdateConfig
+{
+    /// <summary>GitHub repository holding the releases, as `owner/name`.</summary>
+    public string Repository { get; set; } = "XYphrodite/xmrig-fleet";
+
+    /// <summary>Personal access token, needed only when the repository is private.</summary>
+    public string? Token { get; set; }
+
+    /// <summary>Check for a newer release when the interactive console starts.</summary>
+    public bool CheckOnStart { get; set; } = true;
 }
 
 public sealed class ElectricityConfig

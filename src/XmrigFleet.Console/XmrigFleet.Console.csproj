@@ -16,6 +16,8 @@
     <AssemblyName>xmrig-fleet</AssemblyName>
     <RootNamespace>XmrigFleet.Console</RootNamespace>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
