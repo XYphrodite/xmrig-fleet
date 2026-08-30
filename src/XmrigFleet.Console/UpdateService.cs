@@ -62,7 +62,7 @@ public sealed class UpdateService : IDisposable
 
         var asset = FindAsset(doc.RootElement);
         if (asset is null)
-            throw new InvalidOperationException($"Release {tag} has no asset matching '{AssetPattern}'.");
+            throw new InvalidOperationException($"Release {tag} carries no '{AssetName}'.");
 
         var notes = doc.RootElement.TryGetProperty("body", out var b) ? b.GetString() : null;
         return asset with { Version = released, Tag = tag, Notes = notes };
@@ -161,8 +161,14 @@ public sealed class UpdateService : IDisposable
         }
     }
 
-    /// <summary>Release assets are named per platform, e.g. xmrig-fleet-win-x64.zip.</summary>
-    private static string AssetPattern
+    /// <summary>
+    /// The one asset this console may install, e.g. xmrig-fleet-win-x64.zip.
+    ///
+    /// Matched in full rather than by fragment: a release also carries
+    /// xmrig-fleet-agent-win-x64.zip, and a substring match on the platform would happily
+    /// unpack the node agent over the console.
+    /// </summary>
+    public static string AssetName
     {
         get
         {
@@ -173,7 +179,7 @@ public sealed class UpdateService : IDisposable
                 System.Runtime.InteropServices.Architecture.X64 => "x64",
                 var other => other.ToString().ToLowerInvariant(),
             };
-            return $"{os}-{arch}";
+            return $"xmrig-fleet-{os}-{arch}.zip";
         }
     }
 
@@ -185,8 +191,7 @@ public sealed class UpdateService : IDisposable
         foreach (var asset in assets.EnumerateArray())
         {
             var name = asset.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-            if (!name.Contains(AssetPattern, StringComparison.OrdinalIgnoreCase)) continue;
-            if (!name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!name.Equals(AssetName, StringComparison.OrdinalIgnoreCase)) continue;
 
             var url = asset.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;
             if (url is null) continue;

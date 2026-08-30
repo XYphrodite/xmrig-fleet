@@ -35,7 +35,9 @@ $arch = if ([Environment]::Is64BitOperatingSystem) {
 } else {
     throw 'xmrig-fleet needs a 64-bit Windows.'
 }
-$pattern = "win-$arch"
+# Matched in full: a release also ships xmrig-fleet-agent-win-x64.zip, and a substring
+# match on the platform would install the node agent instead of the console.
+$assetName = "xmrig-fleet-win-$arch.zip"
 
 Write-Step "Looking up the newest release of $repo"
 $api = if ($version) { "https://api.github.com/repos/$repo/releases/tags/$version" }
@@ -47,9 +49,10 @@ try {
     throw "Could not read releases of $repo. Is the repository published and does it have a release? ($($_.Exception.Message))"
 }
 
-$asset = $release.assets | Where-Object { $_.name -like "*$pattern*.zip" } | Select-Object -First 1
+$asset = $release.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
 if (-not $asset) {
-    throw "Release $($release.tag_name) has no asset matching *$pattern*.zip."
+    $available = ($release.assets | ForEach-Object { $_.name }) -join ', '
+    throw "Release $($release.tag_name) carries no $assetName. Available: $available"
 }
 
 Write-Host "    $($release.tag_name) - $($asset.name) ($([math]::Round($asset.size / 1MB, 1)) MB)"
@@ -57,44 +60,46 @@ Write-Host "    $($release.tag_name) - $($asset.name) ($([math]::Round($asset.si
 $archive = Join-Path ([IO.Path]::GetTempPath()) "xmrig-fleet-$([guid]::NewGuid().ToString('N')).zip"
 Write-Step 'Downloading'
 
-# Invoke-WebRequest buffers the whole body in memory on 5.1 and renders its own slow
-# progress; stream it instead so the bar is accurate and the download stays fast.
-$client = [Net.Http.HttpClient]::new()
-$client.Timeout = [TimeSpan]::FromMinutes(10)
-$client.DefaultRequestHeaders.Add('User-Agent', 'xmrig-fleet-installer')
+# HttpWebRequest rather than HttpClient: System.Net.Http is not loaded by default in
+# Windows PowerShell 5.1, and Invoke-WebRequest there buffers the whole body in memory
+# behind its own slow progress rendering. Streaming keeps the bar honest and the download fast.
+$request = [Net.HttpWebRequest]::Create($asset.browser_download_url)
+$request.UserAgent = 'xmrig-fleet-installer'
+$request.Timeout = 60000
+$request.ReadWriteTimeout = 300000
+
+$response = $request.GetResponse()
 try {
-    $response = $client.GetAsync($asset.browser_download_url, [Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
-    $response.EnsureSuccessStatusCode() | Out-Null
+    $total = $response.ContentLength
+    if ($total -le 0) { $total = $asset.size }
 
-    $total = $response.Content.Headers.ContentLength
-    if (-not $total) { $total = $asset.size }
-
-    $source = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+    $source = $response.GetResponseStream()
     $file   = [IO.File]::Create($archive)
     try {
         $buffer = New-Object byte[] 81920
         $received = 0L
+        $started = [Diagnostics.Stopwatch]::StartNew()
         $lastReport = [Diagnostics.Stopwatch]::StartNew()
         while (($read = $source.Read($buffer, 0, $buffer.Length)) -gt 0) {
             $file.Write($buffer, 0, $read)
             $received += $read
             # Repainting on every chunk costs more time than the download itself.
-            if ($lastReport.ElapsedMilliseconds -ge 100 -or $received -eq $total) {
+            if ($lastReport.ElapsedMilliseconds -ge 150 -or $received -ge $total) {
                 $lastReport.Restart()
                 $percent = if ($total -gt 0) { [math]::Min(100, [int](100 * $received / $total)) } else { 0 }
-                Write-Progress -Activity 'Downloading xmrig-fleet' `
-                    -Status ("{0:N1} / {1:N1} MB" -f ($received / 1MB), ($total / 1MB)) `
+                $speed = if ($started.Elapsed.TotalSeconds -gt 0) { $received / 1MB / $started.Elapsed.TotalSeconds } else { 0 }
+                Write-Progress -Activity "Downloading $($asset.name)" `
+                    -Status ("{0:N1} / {1:N1} MB   {2:N1} MB/s" -f ($received / 1MB), ($total / 1MB), $speed) `
                     -PercentComplete $percent
             }
         }
     } finally {
         $file.Dispose()
         $source.Dispose()
-        $response.Dispose()
-        Write-Progress -Activity 'Downloading xmrig-fleet' -Completed
+        Write-Progress -Activity "Downloading $($asset.name)" -Completed
     }
 } finally {
-    $client.Dispose()
+    $response.Dispose()
 }
 
 Write-Step "Installing into $target"
