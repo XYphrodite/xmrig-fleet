@@ -53,9 +53,9 @@ Hand-written source only; excludes `bin`/`obj`, generated files, and documentati
 
 | Language | Files | Code lines |
 |----------|------:|-----------:|
-| C# (agent + console + contracts) | 22 | 2,916 |
+| C# (agent + console + contracts) | 22 | 2,960 |
 | PowerShell (`deploy/`) | 2 | 127 |
-| **Total** | **24** | **3,043** |
+| **Total** | **24** | **3,087** |
 
 ---
 
