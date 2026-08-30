@@ -30,6 +30,12 @@ public sealed class MarkupSafetyTests
         return config;
     }
 
+    /// <summary>
+    /// Spectre 0.57.2 writes single-selection choices literally, so this path does not fail
+    /// today even without escaping — verified by removing the escape and watching only the
+    /// multi-selection test go red. It is kept as a canary: if a Spectre upgrade starts
+    /// treating these choices as markup, this turns red instead of an operator's screen.
+    /// </summary>
     [Fact]
     public void SelectNode_renders_a_name_containing_markup()
     {
@@ -42,6 +48,7 @@ public sealed class MarkupSafetyTests
         Assert.Equal(Hostile, picked!.Name);
     }
 
+    /// <summary>The path that actually crashed: multi-selection choices are parsed as markup.</summary>
     [Fact]
     public void SelectNodes_renders_a_name_containing_markup()
     {
