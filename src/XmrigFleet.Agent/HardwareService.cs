@@ -148,11 +148,11 @@ public sealed class HardwareService : IDisposable
     }
 
     /// <summary>
-    /// CPU temperature and package power come from model-specific registers. This version of
-    /// LibreHardwareMonitor reaches them through PawnIO, a signed driver that has to be
-    /// installed separately; without it those sensors are simply absent, with no error.
-    /// GPU sensors are unaffected because they come from the vendor user-mode API, which is
-    /// why a machine can show GPU numbers and nothing for the CPU.
+    /// CPU temperature and package power come from model-specific registers, which need kernel
+    /// access. This version of LibreHardwareMonitor gets there through the PawnIO driver, which
+    /// is installed separately; without it the library still starts and reports whatever needs
+    /// no kernel access. That is why a machine can show GPU numbers - those come from the
+    /// vendor user-mode API - and nothing at all for the CPU.
     ///
     /// Naming the missing piece beats leaving an operator to guess why one column is empty.
     /// </summary>
@@ -161,32 +161,46 @@ public sealed class HardwareService : IDisposable
         if (cpuTemp is not null && cpuPower is > 0) return null;
         if (!OperatingSystem.IsWindows()) return null;
 
-        if (!IsPawnIoInstalled())
+        if (FindPawnIoVersion() is null)
         {
-            return "PawnIO is not installed, so CPU temperature and package power cannot be read. "
-                 + "Install it from pawnio.eu - it is Microsoft-signed and works with Memory "
-                 + "Integrity left on. Until then this node uses powerFallbackWatts.";
+            return "PawnIO is not installed, so CPU temperature and package power stay empty: "
+                 + "LibreHardwareMonitor reads those through it. Install it from pawnio.eu. "
+                 + "Until then this node falls back to powerFallbackWatts.";
         }
 
         return IsElevated()
-            ? "CPU temperature and power sensors are unavailable on this machine."
+            ? "PawnIO is installed but the CPU still reports no temperature or package power."
             : "The agent is not elevated, so CPU temperature and power sensors stay blank.";
     }
 
-    /// <summary>PawnIO registers itself as a kernel service, so its service key is the reliable probe.</summary>
-    private static bool IsPawnIoInstalled()
+    /// <summary>
+    /// Reads the exact registry value LibreHardwareMonitor itself probes for PawnIO
+    /// (Uninstall\PawnIO\DisplayVersion), so this diagnostic cannot disagree with what the
+    /// library actually does. Returns the installed version, or null when absent.
+    /// </summary>
+    private static string? FindPawnIoVersion()
     {
-        if (!OperatingSystem.IsWindows()) return false;
-        try
+        if (!OperatingSystem.IsWindows()) return null;
+
+        foreach (var path in new[]
+                 {
+                     @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO",
+                     @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO",
+                 })
         {
-            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
-                @"SYSTEM\CurrentControlSet\Services\PawnIO");
-            return key is not null;
+            try
+            {
+                using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(path);
+                if (key?.GetValue("DisplayVersion") is string version && version.Length > 0)
+                    return version;
+            }
+            catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+            {
+                // An unreadable hive is not evidence either way; try the next path.
+            }
         }
-        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
-        {
-            return false;
-        }
+
+        return null;
     }
 
     /// <summary>Board, RAM, drives, fans and PSU losses that no CPU/GPU sensor accounts for.</summary>
