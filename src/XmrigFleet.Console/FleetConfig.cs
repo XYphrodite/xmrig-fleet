@@ -20,8 +20,12 @@ public sealed class FleetConfig
     public ElectricityConfig Electricity { get; set; } = new();
     public PoolConfig Pool { get; set; } = new();
 
-    /// <summary>Where to read the XMR spot price. Must return CoinGecko-shaped JSON.</summary>
-    public string PriceApiUrl { get; set; } = "https://api.coingecko.com/api/v3/simple/price?ids=monero&vs_currencies=usd,rub,eur";
+    /// <summary>
+    /// Where to read the XMR spot price when the pool does not publish the configured
+    /// currency. Must return CoinGecko-shaped JSON. `{currency}` is replaced with the
+    /// lower-cased currency code, so the feed is asked for the currency actually in use.
+    /// </summary>
+    public string PriceApiUrl { get; set; } = "https://api.coingecko.com/api/v3/simple/price?ids=monero&vs_currencies={currency}";
 
     public List<NodeConfig> Nodes { get; set; } = [];
 

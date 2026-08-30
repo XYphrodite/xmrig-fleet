@@ -327,8 +327,13 @@ xmrig-fleet/
 - [x] PawnIO diagnostic using LibreHardwareMonitor's own detection key
 - [x] Adopting a miner started outside the agent (image path read from the live process)
 - [x] Install/update: downloaded XMRig `v6.26.0`, unpacked, resolved the executable, and left a running miner untouched
-- [x] Release-asset matching by OS **and** architecture (`-windows-x64.zip`, `-linux-static-x64.tar.gz`)
+- [x] Release-asset matching checked for all six OS/architecture pairs against the live
+      GitHub asset list; no cross-architecture fallback, so `linux/arm64` (which xmrig
+      does not ship) fails with a message naming what was sought
 - [x] Hashvault parsing against live data — balance, payout threshold, paid total, network hashrate, XMR price in the configured currency
+- [x] Price falls back to the external feed only for currencies the pool omits, and is
+      left blank rather than substituted: verified `GBP` via the feed and `KZT` blank
+      (no source carries it)
 - [x] One-shot CLI (`status`, `economics`, `pool`, `help`) with meaningful exit codes
 - [x] Clean solution build, zero warnings
 

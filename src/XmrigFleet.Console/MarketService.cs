@@ -125,8 +125,12 @@ public sealed class MarketService : IDisposable
     }
 
     /// <summary>
-    /// Spot XMR price in the configured currency. The pool publishes prices for the common
-    /// currencies, so the external feed is only used when it does not carry this one.
+    /// Spot XMR price in the configured currency. The pool publishes only a handful of
+    /// currencies (btc, usd, eur, rub), so the external feed covers the rest.
+    ///
+    /// Returns null rather than a price in some other currency: every screen labels this
+    /// number with the configured currency, so a USD figure shown as KZT would be wrong by
+    /// a factor of ~500 and would silently poison the whole economics screen.
     /// </summary>
     public async Task<double?> GetPriceAsync(CancellationToken ct)
     {
@@ -139,13 +143,15 @@ public sealed class MarketService : IDisposable
 
         if (string.IsNullOrWhiteSpace(_config.PriceApiUrl)) return null;
 
-        var root = await GetJsonAsync(_config.PriceApiUrl, ct);
-        if (root is null) return null;
-
         var currency = _config.Electricity.Currency.ToLowerInvariant();
-        var monero = Path(root.Value, "monero");
-        return Number(monero, currency) ?? Number(monero, "usd");
+        var url = _config.PriceApiUrl.Replace(CurrencyPlaceholder, currency, StringComparison.OrdinalIgnoreCase);
+
+        var root = await GetJsonAsync(url, ct);
+        return root is null ? null : Number(Path(root.Value, "monero"), currency);
     }
+
+    /// <summary>Replaced with the configured currency code before the price feed is called.</summary>
+    public const string CurrencyPlaceholder = "{currency}";
 
     private (double? Price, string? Currency) ReadPoolPrice(JsonElement market)
     {

@@ -60,7 +60,14 @@ public sealed class InstallerService
             {
                 var asset = await ResolveReleaseAssetAsync(http, request.Version, ct);
                 if (asset is null)
-                    return new InstallResultDto(false, "No xmrig release asset matched this platform.", null, null);
+                {
+                    var wanted = string.Join(" or ", AssetPatterns());
+                    return new InstallResultDto(
+                        false,
+                        $"No xmrig release asset matches this node ({RuntimeDescription()}); looked for {wanted}.",
+                        null,
+                        null);
+                }
                 (url, version) = asset.Value;
             }
 
@@ -158,34 +165,51 @@ public sealed class InstallerService
         return null;
     }
 
-    /// <summary>Asset-name fragments to look for, most specific first.</summary>
-    private static IEnumerable<string> AssetPatterns()
+    /// <summary>
+    /// Asset-name fragments to look for, most specific first. Release assets are named like
+    /// xmrig-6.26.0-windows-x64.zip / -linux-static-x64.tar.gz / -macos-arm64.tar.gz.
+    ///
+    /// There is deliberately no fallback to another architecture: handing an x64 archive to
+    /// an arm64 node would report a successful install and then fail to execute, which is
+    /// worse than saying up front that no asset matches.
+    /// </summary>
+    private static IEnumerable<string> AssetPatterns(bool isWindows, bool isMacOs, string arch)
     {
-        var arch = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture switch
-        {
-            System.Runtime.InteropServices.Architecture.Arm64 => "arm64",
-            _ => "x64",
-        };
-
-        if (OperatingSystem.IsWindows())
+        if (isWindows)
         {
             // The plain build is the MSVC one; -windows-gcc- is a separate, slower variant.
             yield return $"-windows-{arch}.zip";
-            yield return "-windows-x64.zip";
         }
-        else if (OperatingSystem.IsMacOS())
+        else if (isMacOs)
         {
             yield return $"-macos-{arch}.tar.gz";
-            yield return "-macos-x64.tar.gz";
         }
         else
         {
-            // The static build has no glibc version to match against the node.
+            // The static build carries no glibc version to match against the node.
             yield return $"-linux-static-{arch}.tar.gz";
-            yield return "-linux-static-x64.tar.gz";
-            yield return "-linux-";
+            yield return $"-linux-{arch}.tar.gz";
         }
     }
+
+    private static IEnumerable<string> AssetPatterns() =>
+        AssetPatterns(OperatingSystem.IsWindows(), OperatingSystem.IsMacOS(), CurrentArchitecture());
+
+    private static string RuntimeDescription()
+    {
+        var os = OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
+        return $"{os}/{CurrentArchitecture()}";
+    }
+
+    /// <summary>The architecture fragment xmrig uses in its asset names.</summary>
+    private static string CurrentArchitecture() =>
+        System.Runtime.InteropServices.RuntimeInformation.OSArchitecture switch
+        {
+            System.Runtime.InteropServices.Architecture.X64 => "x64",
+            System.Runtime.InteropServices.Architecture.Arm64 => "arm64",
+            // Anything else has no xmrig build; name it so the failure message stays honest.
+            var other => other.ToString().ToLowerInvariant(),
+        };
 
     private static void Extract(string archive, string targetPath)
     {

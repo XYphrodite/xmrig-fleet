@@ -43,7 +43,9 @@ public sealed class EconomicsScreen
         summary.AddRow("[grey]Fleet hashrate[/]", $"[aqua]{Economics.FormatHashrate(economics.TotalHashrate)}[/]");
         summary.AddRow("[grey]Power draw[/]", $"{economics.TotalWatts:0} W");
         summary.AddRow("[grey]Electricity[/]", $"{_config.Electricity.PricePerKwh:N2} {UiHelpers.Escape(currency)} / kWh");
-        summary.AddRow("[grey]XMR price[/]", price is null ? "[yellow]price feed unavailable[/]" : $"{price:N2} {UiHelpers.Escape(currency)}");
+        summary.AddRow("[grey]XMR price[/]", price is null
+            ? $"[yellow]no price available in {UiHelpers.Escape(currency)}[/]"
+            : $"{price:N2} {UiHelpers.Escape(currency)}");
         summary.AddRow("[grey]Network hashrate[/]", network?.NetworkHashrate is { } nh ? Economics.FormatHashrate(nh) : "[yellow]pool API unavailable[/]");
         AnsiConsole.Write(new Panel(summary).Header("[bold]Inputs[/]").Border(BoxBorder.Rounded).Expand());
 
