@@ -21,6 +21,7 @@ public static class Cli
           economics      cost, income and profit summary
           pool           pool and wallet balance
           update         download and install a newer xmrig-fleet
+          upgrade-agents update the agent on the nodes themselves
           version        print the running version
           help           this text
 
@@ -56,6 +57,9 @@ public static class Cli
 
             case "update":
                 return await Updater.RunAsync(config, names.Contains("--check") || names.Contains("check"), ct);
+
+            case "upgrade-agents" or "upgrade-agent":
+                return await UpgradeAgentsAsync(config, fleet, names, ct);
 
             case "version" or "--version" or "v":
                 AnsiConsole.WriteLine($"xmrig-fleet {UpdateService.CurrentVersion}");
@@ -108,6 +112,114 @@ public static class Cli
 
         // Non-zero exit when something is wrong, so a scheduled task can alert on it.
         return states.Any(s => !s.Online) ? 1 : 0;
+    }
+
+    /// <summary>
+    /// Rolls the agent binary out to the nodes. Deliberately sequential and deliberately
+    /// verify-first: a node that is already unreachable must be reported, not written to, and
+    /// taking the fleet's agents down in one shot would leave nothing to diagnose from if the
+    /// release turned out to be broken. Miners keep hashing throughout - the agent restart does
+    /// not touch them.
+    /// </summary>
+    private static async Task<int> UpgradeAgentsAsync(FleetConfig config, FleetService fleet, string[] names, CancellationToken ct)
+    {
+        var version = names.FirstOrDefault(n => n.StartsWith("--version=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1];
+        var force = names.Contains("--force");
+        var wanted = names.Where(n => !n.StartsWith("--", StringComparison.Ordinal)).ToArray();
+
+        var targets = wanted.Length == 0
+            ? fleet.EnabledNodes
+            : wanted.Select(config.FindNode).OfType<NodeConfig>().ToList();
+
+        foreach (var name in wanted.Where(n => config.FindNode(n) is null))
+            AnsiConsole.MarkupLine($"[red]No node named '{Markup.Escape(name)}'.[/]");
+
+        if (targets.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]Nothing to do.[/]");
+            return 1;
+        }
+
+        var failures = 0;
+
+        foreach (var node in targets.OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            using var client = fleet.CreateClient(node);
+
+            AgentInfoDto? before;
+            try
+            {
+                before = await client.GetInfoAsync(ct);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                // Never write to a node that is not answering: if the token is wrong or the
+                // service is down, an update cannot fix it and may make the state harder to read.
+                UiHelpers.Result(false, $"{node.Name}: unreachable, skipped ({ex.Message})");
+                failures++;
+                continue;
+            }
+
+            AnsiConsole.MarkupLine($"[grey]{UiHelpers.Escape(node.Name)}[/] agent {UiHelpers.Escape(before?.AgentVersion ?? "?")} -> updating...");
+
+            try
+            {
+                var result = await client.UpdateAgentAsync(new AgentUpdateRequestDto { Version = version, Force = force }, ct);
+                if (result is null)
+                {
+                    UiHelpers.Result(false, $"{node.Name}: the agent returned no result");
+                    failures++;
+                    continue;
+                }
+
+                UiHelpers.Result(result.Ok, $"{node.Name}: {result.Message}");
+                if (!result.Ok) { failures++; continue; }
+                if (!result.Restarting) continue;
+
+                if (await WaitForAgentAsync(fleet, node, ct) is { } after)
+                    AnsiConsole.MarkupLine($"  [green]back up[/] on {UiHelpers.Escape(after.AgentVersion)}");
+                else
+                {
+                    AnsiConsole.MarkupLine("  [yellow]did not come back within 90s - check the service on the node[/]");
+                    failures++;
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                // The agent can drop the connection while swapping itself; that is not a failure
+                // on its own, so fall through to the same wait-and-verify path.
+                AnsiConsole.MarkupLine($"  [grey]connection closed during the swap, waiting for the restart...[/]");
+                if (await WaitForAgentAsync(fleet, node, ct) is { } after)
+                    AnsiConsole.MarkupLine($"  [green]back up[/] on {UiHelpers.Escape(after.AgentVersion)}");
+                else
+                {
+                    UiHelpers.Result(false, $"{node.Name}: did not come back ({ex.Message})");
+                    failures++;
+                }
+            }
+        }
+
+        return failures == 0 ? 0 : 1;
+    }
+
+    /// <summary>Polls a node until its agent answers again, for as long as the restart should take.</summary>
+    private static async Task<AgentInfoDto?> WaitForAgentAsync(FleetService fleet, NodeConfig node, CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(90);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(3), ct);
+            try
+            {
+                using var client = fleet.CreateClient(node, TimeSpan.FromSeconds(5));
+                if (await client.GetInfoAsync(ct) is { } info) return info;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                // Still restarting.
+            }
+        }
+        return null;
     }
 
     private static async Task<int> ControlAsync(

@@ -119,4 +119,23 @@ public sealed record InstallRequestDto
 
 public sealed record InstallResultDto(bool Ok, string Message, string? InstalledVersion, string? ExecutablePath);
 
+/// <summary>Update the agent itself from a published xmrig-fleet release.</summary>
+public sealed record AgentUpdateRequestDto
+{
+    /// <summary>Release tag such as "v1.4.0", or null/"latest" for the newest.</summary>
+    public string? Version { get; init; }
+    /// <summary>Overrides <see cref="Version"/> when set: a direct .zip URL.</summary>
+    public string? DownloadUrl { get; init; }
+    /// <summary>Reinstall even when the node already runs that version.</summary>
+    public bool Force { get; init; }
+}
+
+public sealed record AgentUpdateResultDto(
+    bool Ok,
+    string Message,
+    string? FromVersion,
+    string? ToVersion,
+    /// <summary>True when the agent swapped itself and is about to exit for the service manager to restart it.</summary>
+    bool Restarting);
+
 public sealed record LogTailDto(string Source, IReadOnlyList<string> Lines);

@@ -24,6 +24,7 @@ builder.Services.AddSingleton(new MinerConfigStore(basePath));
 builder.Services.AddSingleton<MinerService>();
 builder.Services.AddSingleton<HardwareService>();
 builder.Services.AddSingleton<InstallerService>();
+builder.Services.AddSingleton<AgentUpdateService>();
 builder.Services.AddHttpClient("github", client =>
 {
     // The GitHub API rejects requests without a User-Agent.
@@ -38,6 +39,9 @@ var app = builder.Build();
 var startedAt = Stopwatch.GetTimestamp();
 var agentVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
 
+// Files displaced by a previous self-update are dead weight once the new binary is running.
+AgentUpdateService.CleanUpPreviousUpdate();
+
 if (string.IsNullOrWhiteSpace(options.Token))
 {
     app.Logger.LogWarning(
@@ -49,10 +53,13 @@ if (string.IsNullOrWhiteSpace(options.Token))
 // stops anything else on the tailnet (or the LAN) from driving the miner.
 app.Use(async (context, next) =>
 {
-    var configured = context.RequestServices.GetRequiredService<IOptions<AgentOptions>>().Value.Token;
+    // Sanitised on both sides: PowerShell writes appsettings.json as UTF-8 with a BOM, and a
+    // stray BOM or trailing newline in the token is invisible in an editor but locks the console
+    // out of the node with a 401 that looks like a wrong secret. The console trims the same way.
+    var configured = Sanitize(context.RequestServices.GetRequiredService<IOptions<AgentOptions>>().Value.Token);
     if (!string.IsNullOrWhiteSpace(configured))
     {
-        var presented = context.Request.Headers["X-Fleet-Token"].ToString();
+        var presented = Sanitize(context.Request.Headers["X-Fleet-Token"].ToString());
         if (!FixedTimeEquals(presented, configured))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -91,6 +98,11 @@ api.MapPost("/install", (InstallRequestDto request, InstallerService installer, 
 
 api.MapGet("/logs", (MinerService miner) => new LogTailDto("xmrig", miner.RecentOutput));
 
+// Updates the agent itself and restarts into the new binary. The miner is a separate process
+// and keeps hashing; the node's token files are deliberately left untouched.
+api.MapPost("/agent/update", (AgentUpdateRequestDto request, AgentUpdateService updater, CancellationToken ct) =>
+    updater.UpdateAsync(request, ct));
+
 app.Logger.LogInformation("xmrig-fleet agent {Version} listening on {Url}", agentVersion, options.ListenUrl);
 
 if (options.AutoStartMiner)
@@ -110,6 +122,9 @@ AgentInfoDto Info() => new(
     ApiVersion.Current,
     Stopwatch.GetElapsedTime(startedAt).TotalSeconds,
     HardwareService.IsElevated());
+
+/// <summary>Strips whitespace and a byte-order mark, which editors and PowerShell add invisibly.</summary>
+static string Sanitize(string? value) => (value ?? "").Trim().Trim('﻿');
 
 static bool FixedTimeEquals(string a, string b)
 {

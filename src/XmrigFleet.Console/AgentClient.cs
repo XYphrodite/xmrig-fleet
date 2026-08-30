@@ -65,6 +65,23 @@ public sealed class AgentClient : IDisposable
         return await response.Content.ReadFromJsonAsync<InstallResultDto>(JsonOptions, cts.Token);
     }
 
+    /// <summary>
+    /// Updates the agent itself. The node answers before it restarts, so a normal timeout is
+    /// enough; the connection may still drop mid-reply if the swap is fast, which the caller
+    /// treats as success-pending rather than failure.
+    /// </summary>
+    public async Task<AgentUpdateResultDto?> UpdateAgentAsync(AgentUpdateRequestDto request, CancellationToken ct)
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Post, "agent/update")
+        {
+            Content = JsonContent.Create(request, options: JsonOptions),
+        };
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromMinutes(6));
+        using var response = await _http.SendAsync(message, cts.Token);
+        return await response.Content.ReadFromJsonAsync<AgentUpdateResultDto>(JsonOptions, cts.Token);
+    }
+
     private async Task<CommandResultDto?> PostAsync(string path, CancellationToken ct)
     {
         using var response = await _http.PostAsync(path, content: null, ct);

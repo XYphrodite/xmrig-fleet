@@ -150,6 +150,7 @@ hardware.
 | `MinerService` | Start/stop/restart XMRig, read `/2/summary` and `/2/backends` off the loopback API, keep the last 200 output lines |
 | `HardwareService` | LibreHardwareMonitor sensors, power estimate, PawnIO diagnostics |
 | `InstallerService` | Resolve the right GitHub release asset, download, unpack, repoint the config |
+| `AgentUpdateService` | Update the agent itself from an xmrig-fleet release and restart into it |
 | `MinerConfigStore` | Durable per-node miner settings |
 
 ### 2. **XmrigFleet.Console**
@@ -190,6 +191,7 @@ chasing coverage.
 
 | File | Guards |
 |------|--------|
+| `AgentUpdateTests` | The agent picks its own release asset and never the console's, the two never want the same file, the node's token files are excluded from the swap, and a `v1.4.0` tag is recognised as the `1.4.0.0` build already running |
 | `MarkupSafetyTests` | Prompts and badges render data holding `[` — the crash that reached the operator twice. Drives real prompts through `Spectre.Console.Testing`, and asserts escaping never reaches the stored value |
 | `EconomicsTests` | Per-node tariffs summed separately, the income formula, idle nodes not charged, measured power beating the configured fallback |
 | `UpdateAssetTests` | `update` matches the console asset and never the agent one that sits beside it in the same release |
@@ -215,6 +217,7 @@ All routes live under `/api/v1` and require the `X-Fleet-Token` header.
 | `GET` / `PUT` | `/config` | Read or patch the stored miner config |
 | `POST` | `/install` | Install or update XMRig into a target directory |
 | `GET` | `/logs` | Last 200 captured output lines |
+| `POST` | `/agent/update` | Update the agent itself and restart into the new build |
 
 ---
 
@@ -308,6 +311,7 @@ xmrig-fleet restart
 xmrig-fleet economics
 xmrig-fleet pool
 xmrig-fleet update [--check]    # --check reports and exits 1 without installing
+xmrig-fleet upgrade-agents [node ...] [--version=v1.5.0] [--force]
 xmrig-fleet version
 ```
 
@@ -403,6 +407,9 @@ xmrig-fleet/
       throughput far more than the CPU model does, and were previously invisible
 
 ### Implemented, Not Yet Verified Live ⏳
+- [ ] `upgrade-agents`: console-driven agent self-update. Written and unit-tested, but no node
+      has yet been rolled over with it — the one node that needed it was locked out by a token
+      mismatch at the time, which is exactly the case the command refuses to touch
 - [ ] Interactive TUI rendering in a real terminal (the development session had
       redirected output; the console correctly refuses and prints CLI usage instead)
 - [ ] `install-agent.ps1` service registration and firewall scoping on a clean node
@@ -413,8 +420,8 @@ xmrig-fleet/
 - [ ] **Bring CPU temperature and package power online**: install PawnIO on one node,
       confirm the sensors appear, then roll it out fleet-wide and drop the
       `powerFallbackWatts` workaround where real readings exist
-- [ ] Self-update for the agent, driven from the console, so nodes do not need a manual
-      `install-agent.ps1` re-run
+- [ ] Roll `powerFallbackWatts` out from real wall-meter readings, so the economics stop
+      resting on estimates
 - [ ] Hashrate history with a sparkline per node
 - [ ] Alerting: node offline, miner dead, temperature over threshold
 - [ ] Per-node XMRig config templates (thread pinning, huge pages, MSR flags)

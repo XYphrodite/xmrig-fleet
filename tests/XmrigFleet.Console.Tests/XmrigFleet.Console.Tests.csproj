@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\XmrigFleet.Console\XmrigFleet.Console.csproj" />
+    <ProjectReference Include="..\..\src\XmrigFleet.Agent\XmrigFleet.Agent.csproj" />
   </ItemGroup>
 
 </Project>
