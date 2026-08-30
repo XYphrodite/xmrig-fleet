@@ -148,25 +148,24 @@ public sealed class HardwareService : IDisposable
     }
 
     /// <summary>
-    /// CPU temperature and package power come from model-specific registers, which need the
-    /// WinRing0 kernel driver. That driver is on the Microsoft vulnerable-driver blocklist,
-    /// so Memory Integrity (HVCI) refuses to load it and every MSR reader on the machine goes
-    /// blank - LibreHardwareMonitor here, and equally the xmrig MSR mod. GPU sensors are
-    /// unaffected because they come from the vendor user-mode API.
+    /// CPU temperature and package power come from model-specific registers. This version of
+    /// LibreHardwareMonitor reaches them through PawnIO, a signed driver that has to be
+    /// installed separately; without it those sensors are simply absent, with no error.
+    /// GPU sensors are unaffected because they come from the vendor user-mode API, which is
+    /// why a machine can show GPU numbers and nothing for the CPU.
     ///
-    /// Saying so beats leaving an operator to guess why one column is empty.
+    /// Naming the missing piece beats leaving an operator to guess why one column is empty.
     /// </summary>
     private static string? DescribeMissingCpuSensors(double? cpuTemp, double? cpuPower)
     {
         if (cpuTemp is not null && cpuPower is > 0) return null;
         if (!OperatingSystem.IsWindows()) return null;
 
-        if (IsMemoryIntegrityEnabled())
+        if (!IsPawnIoInstalled())
         {
-            return "Memory Integrity (HVCI) is on, so the ring0 driver that reads CPU temperature "
-                 + "and package power cannot load. The xmrig MSR mod is disabled by the same block, "
-                 + "which costs RandomX hashrate. Set powerFallbackWatts for this node, or turn "
-                 + "Memory Integrity off on a dedicated rig.";
+            return "PawnIO is not installed, so CPU temperature and package power cannot be read. "
+                 + "Install it from pawnio.eu - it is Microsoft-signed and works with Memory "
+                 + "Integrity left on. Until then this node uses powerFallbackWatts.";
         }
 
         return IsElevated()
@@ -174,14 +173,15 @@ public sealed class HardwareService : IDisposable
             : "The agent is not elevated, so CPU temperature and power sensors stay blank.";
     }
 
-    private static bool IsMemoryIntegrityEnabled()
+    /// <summary>PawnIO registers itself as a kernel service, so its service key is the reliable probe.</summary>
+    private static bool IsPawnIoInstalled()
     {
         if (!OperatingSystem.IsWindows()) return false;
         try
         {
             using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
-                @"SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity");
-            return key?.GetValue("Enabled") is int enabled && enabled == 1;
+                @"SYSTEM\CurrentControlSet\Services\PawnIO");
+            return key is not null;
         }
         catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
         {
