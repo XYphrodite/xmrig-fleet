@@ -154,6 +154,7 @@ LibreHardwareMonitor 0.9.6 получает его через драйвер **P
 
 ```
 dotnet build            # решение целиком
+dotnet test             # тесты консоли (разметка, деньги, обновление)
 dotnet run --project src/XmrigFleet.Agent      # агент в консоли, для отладки
 dotnet run --project src/XmrigFleet.Console    # TUI
 ```

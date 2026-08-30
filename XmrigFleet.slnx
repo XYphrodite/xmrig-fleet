@@ -4,4 +4,7 @@
     <Project Path="src/XmrigFleet.Console/XmrigFleet.Console.csproj" />
     <Project Path="src/XmrigFleet.Contracts/XmrigFleet.Contracts.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/XmrigFleet.Console.Tests/XmrigFleet.Console.Tests.csproj" />
+  </Folder>
 </Solution>

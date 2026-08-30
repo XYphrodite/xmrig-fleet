@@ -53,9 +53,10 @@ Hand-written source only; excludes `bin`/`obj`, generated files, and documentati
 
 | Language | Files | Code lines |
 |----------|------:|-----------:|
-| C# (agent + console + contracts) | 24 | 3,291 |
-| PowerShell (`deploy/`) | 4 | 321 |
-| **Total** | **28** | **3,612** |
+| C# (agent + console + contracts) | 24 | 3,307 |
+| C# (tests) | 4 | 243 |
+| PowerShell (`deploy/`) | 4 | 325 |
+| **Total** | **32** | **3,875** |
 
 ---
 
@@ -127,7 +128,8 @@ API enabled, so hashrate never has to be scraped from stdout.
 
 ## Project Components
 
-The solution ([XmrigFleet.slnx](XmrigFleet.slnx)) contains **three** projects.
+The solution ([XmrigFleet.slnx](XmrigFleet.slnx)) contains **four** projects — three that
+ship, plus a test project.
 
 ### 1. **XmrigFleet.Agent**
 **Type**: ASP.NET Core Minimal API -> `xmrig-fleet-agent.exe`
@@ -179,6 +181,21 @@ install/push/logs), `NodesScreen` (discover/add/edit/test), `HardwareScreen`,
 **Purpose**: The wire contract shared by both sides — `NodeSnapshotDto`,
 `MinerStatusDto`, `HardwareDto`, `MinerConfigDto`, `InstallRequestDto`,
 `CommandResultDto`, plus `ApiVersion.Current` so the console can warn on a mismatch.
+
+### 4. **XmrigFleet.Console.Tests**
+**Type**: xUnit test project
+**Location**: `tests/XmrigFleet.Console.Tests/`
+**Purpose**: Guards the three contracts that have actually broken in use, rather than
+chasing coverage.
+
+| File | Guards |
+|------|--------|
+| `MarkupSafetyTests` | Prompts and badges render data holding `[` — the crash that reached the operator twice. Drives real prompts through `Spectre.Console.Testing`, and asserts escaping never reaches the stored value |
+| `EconomicsTests` | Per-node tariffs summed separately, the income formula, idle nodes not charged, measured power beating the configured fallback |
+| `UpdateAssetTests` | `update` matches the console asset and never the agent one that sits beside it in the same release |
+
+`AnsiConsole.Console` is a global that the markup tests swap, so
+[AssemblyInfo.cs](tests/XmrigFleet.Console.Tests/AssemblyInfo.cs) disables parallel runs.
 
 ---
 
@@ -331,6 +348,8 @@ xmrig-fleet/
 │   │   ├── Updater.cs             # the update command and its progress bar
 │   │   └── Cli.cs                 # one-shot commands
 │   └── XmrigFleet.Contracts/      # DTOs shared by both sides
+├── tests/
+│   └── XmrigFleet.Console.Tests/  # markup, money and update-asset contracts
 ├── deploy/
 │   ├── install.ps1                # one-line operator install (irm ... | iex)
 │   ├── release.ps1                # build, package and publish a GitHub release
@@ -420,7 +439,9 @@ xmrig-fleet/
   and check `CodeIntegrity/Operational` event 3033 if a driver is blocked.
 - **Pushing pool settings does not restart the miner**; the operator must restart it for
   new settings to apply.
-- **No automated tests.** Verification so far is manual against a live agent.
+- **Test coverage is narrow.** [tests/](tests/) covers the markup, money and update-asset
+  contracts that have actually broken; the agent, the pool parser and the HTTP layer are
+  still verified only by hand against a live node.
 
 ---
 
