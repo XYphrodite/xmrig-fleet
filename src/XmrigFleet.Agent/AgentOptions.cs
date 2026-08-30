@@ -26,18 +26,59 @@ public sealed class MinerConfigStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
     private readonly string _path;
+    private readonly string _apiTokenPath;
     private readonly object _gate = new();
     private MinerConfigDto _current;
 
     public MinerConfigStore(string basePath)
     {
         _path = Path.Combine(basePath, "miner.json");
+        _apiTokenPath = Path.Combine(basePath, "xmrig-api.token");
         _current = Load();
     }
 
     public MinerConfigDto Current
     {
         get { lock (_gate) return _current; }
+    }
+
+    /// <summary>
+    /// The bearer token the agent starts XMRig with, kept across agent restarts.
+    ///
+    /// It used to be generated per process, so restarting the agent — a service restart, an
+    /// update, a crash — left it unable to read the miner it had started itself, and the node
+    /// reported "mining (no api)" with no hashrate until someone restarted the miner. The
+    /// token lives beside the binary, which only administrators can read, and grants nothing
+    /// beyond the local miner API.
+    /// </summary>
+    public string GetOrCreateApiToken()
+    {
+        lock (_gate)
+        {
+            try
+            {
+                if (File.Exists(_apiTokenPath))
+                {
+                    var existing = File.ReadAllText(_apiTokenPath).Trim();
+                    if (existing.Length >= 16) return existing;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // An unreadable token file is not fatal: fall through and mint a new one.
+            }
+
+            var token = Guid.NewGuid().ToString("N");
+            try
+            {
+                File.WriteAllText(_apiTokenPath, token);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Without persistence the agent still works, it just goes blind after a restart.
+            }
+            return token;
+        }
     }
 
     public MinerConfigDto Update(MinerConfigDto patch)

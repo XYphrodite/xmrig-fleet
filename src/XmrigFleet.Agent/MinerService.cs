@@ -20,7 +20,7 @@ public sealed class MinerService : IDisposable
     private readonly ILogger<MinerService> _log;
     private readonly HttpClient _http;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly string _apiToken = Guid.NewGuid().ToString("N");
+    private readonly string _apiToken;
     private readonly LinkedList<string> _recentOutput = new();
 
     private Process? _process;
@@ -31,6 +31,7 @@ public sealed class MinerService : IDisposable
         _options = options.Value;
         _log = log;
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+        _apiToken = config.GetOrCreateApiToken();
     }
 
     public IReadOnlyList<string> RecentOutput

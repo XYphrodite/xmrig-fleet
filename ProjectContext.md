@@ -391,6 +391,8 @@ xmrig-fleet/
 - [x] `start` / `stop` / `restart` against a real miner, with the operator's own pool,
       wallet and arguments carried over; hashrate became readable (2.29 kH/s) because the
       agent now owns the process and its API token
+- [x] The XMRig API token now survives an agent restart, so a service restart or an
+      update no longer leaves a node reporting `mining (no api)`
 - [x] A miner started by the agent survives the agent being killed — restarting or
       updating the agent does not stop mining
 - [x] One-line install (`irm ... | iex`) from a published release, and self-update
@@ -407,10 +409,6 @@ xmrig-fleet/
 - [ ] **Bring CPU temperature and package power online**: install PawnIO on one node,
       confirm the sensors appear, then roll it out fleet-wide and drop the
       `powerFallbackWatts` workaround where real readings exist
-- [ ] **Persist the XMRig API token in `miner.json`.** The token is generated per agent
-      process, so a restarted agent can no longer read a miner it started itself and the
-      node falls back to `mining (no api)` until the miner is restarted. Observed live
-      after restarting the agent on 2026-08-30.
 - [ ] Self-update for the agent, driven from the console, so nodes do not need a manual
       `install-agent.ps1` re-run
 - [ ] Hashrate history with a sparkline per node
