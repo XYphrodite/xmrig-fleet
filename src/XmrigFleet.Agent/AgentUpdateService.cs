@@ -47,13 +47,11 @@ public sealed class AgentUpdateService
     public static IReadOnlyList<string> ProtectedFileNames => ProtectedFiles;
 
     private readonly IHttpClientFactory _httpFactory;
-    private readonly IHostApplicationLifetime _lifetime;
     private readonly ILogger<AgentUpdateService> _log;
 
-    public AgentUpdateService(IHttpClientFactory httpFactory, IHostApplicationLifetime lifetime, ILogger<AgentUpdateService> log)
+    public AgentUpdateService(IHttpClientFactory httpFactory, ILogger<AgentUpdateService> log)
     {
         _httpFactory = httpFactory;
-        _lifetime = lifetime;
         _log = log;
     }
 
@@ -130,12 +128,17 @@ public sealed class AgentUpdateService
     /// <summary>
     /// Leaves long enough for the HTTP response to reach the console, then exits non-zero so the
     /// service manager restarts the process on the freshly written binary.
+    ///
+    /// Deliberately a hard exit rather than IHostApplicationLifetime.StopApplication(): a
+    /// graceful shutdown returns exit code 0, which SCM reads as "this service was meant to
+    /// stop" and leaves the node dead until somebody visits it. Only a non-zero code triggers
+    /// the configured failure actions. Nothing here needs an orderly shutdown - the miner is a
+    /// separate process and the config is written synchronously.
     /// </summary>
     private void ScheduleRestart() => _ = Task.Run(async () =>
     {
         await Task.Delay(TimeSpan.FromSeconds(2));
-        _lifetime.StopApplication();
-        await Task.Delay(TimeSpan.FromSeconds(3));
+        _log.LogWarning("Agent update: exiting with {Code} so the service manager restarts the new binary", RestartExitCode);
         Environment.Exit(RestartExitCode);
     });
 
