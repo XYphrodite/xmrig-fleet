@@ -80,7 +80,17 @@ public sealed class FleetConfig
     public NodeConfig? FindNode(string name) =>
         Nodes.FirstOrDefault(n => n.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
-    public string TokenFor(NodeConfig node) => string.IsNullOrWhiteSpace(node.Token) ? Token : node.Token;
+    public string TokenFor(NodeConfig node) =>
+        Sanitize(string.IsNullOrWhiteSpace(node.Token) ? Token : node.Token);
+
+    /// <summary>
+    /// Strips whitespace and a byte-order mark from a token. A token pasted from a file or
+    /// a terminal easily carries a trailing newline or a BOM, and those characters make the
+    /// HTTP header itself invalid: the request then fails at the transport level and the node
+    /// is reported unreachable rather than unauthorized, which sends the operator hunting the
+    /// wrong problem.
+    /// </summary>
+    private static string Sanitize(string token) => token.Trim().Trim('﻿', '​');
 
     /// <summary>The tariff that actually applies to a node: its own, else the fleet default.</summary>
     public double PricePerKwhFor(NodeConfig node) => node.PricePerKwh ?? Electricity.PricePerKwh;

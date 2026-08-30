@@ -149,7 +149,9 @@ public sealed class MinerScreen
 
         AnsiConsole.MarkupLine($"[grey]pool[/] {UiHelpers.Escape(_config.Pool.Url)}");
         AnsiConsole.MarkupLine($"[grey]wallet[/] {UiHelpers.Escape(_config.Pool.Wallet)}");
-        AnsiConsole.MarkupLine("[grey]worker name[/] = node name");
+        AnsiConsole.MarkupLine(string.IsNullOrWhiteSpace(_config.Pool.Password)
+            ? "[grey]worker name[/] = node name (the pool password field)"
+            : $"[grey]worker name[/] {UiHelpers.Escape(_config.Pool.Password)} [grey]on every node[/]");
         AnsiConsole.WriteLine();
 
         var results = new List<(string Node, bool Ok, string Message)>();
@@ -165,8 +167,12 @@ public sealed class MinerScreen
                         ExecutablePath = node.MinerPath,
                         PoolUrl = _config.Pool.Url,
                         Wallet = _config.Pool.Wallet,
-                        WorkerName = node.Name,
-                        Password = _config.Pool.Password,
+                        // Hashvault reads the worker name from the password field, not from
+                        // an address suffix. Leaving the fleet password blank therefore gives
+                        // every rig its own name in the pool's worker list; setting one merges
+                        // them under it.
+                        WorkerName = null,
+                        Password = string.IsNullOrWhiteSpace(_config.Pool.Password) ? node.Name : _config.Pool.Password,
                         PowerFallbackWatts = node.PowerFallbackWatts,
                     }, ct);
                     lock (results) results.Add((node.Name, pushed is not null, pushed?.ExecutablePath ?? "config saved"));
