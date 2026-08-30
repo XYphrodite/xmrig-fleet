@@ -40,15 +40,15 @@ public sealed class SettingsScreen
             switch (choice)
             {
                 case "Fleet token":
-                    _config.Token = AnsiConsole.Prompt(new TextPrompt<string>("Shared token (must match Agent:Token on every node):")
+                    _config.Token = AnsiConsole.Prompt(UiHelpers.Text("Shared token (must match Agent:Token on every node):")
                         .AllowEmpty().DefaultValue(_config.Token));
                     break;
 
                 case "Pool & wallet":
-                    _config.Pool.Url = AnsiConsole.Prompt(new TextPrompt<string>("Stratum URL:").DefaultValue(_config.Pool.Url));
-                    _config.Pool.Wallet = AnsiConsole.Prompt(new TextPrompt<string>("Wallet address:").AllowEmpty().DefaultValue(_config.Pool.Wallet));
-                    _config.Pool.ApiBase = AnsiConsole.Prompt(new TextPrompt<string>("Pool REST API base:").DefaultValue(_config.Pool.ApiBase));
-                    _config.Pool.Password = Blank(AnsiConsole.Prompt(new TextPrompt<string>("Pool password (blank = worker name):")
+                    _config.Pool.Url = AnsiConsole.Prompt(UiHelpers.Text("Stratum URL:").DefaultValue(_config.Pool.Url));
+                    _config.Pool.Wallet = AnsiConsole.Prompt(UiHelpers.Text("Wallet address:").AllowEmpty().DefaultValue(_config.Pool.Wallet));
+                    _config.Pool.ApiBase = AnsiConsole.Prompt(UiHelpers.Text("Pool REST API base:").DefaultValue(_config.Pool.ApiBase));
+                    _config.Pool.Password = Blank(AnsiConsole.Prompt(UiHelpers.Text("Pool password (blank = worker name):")
                         .AllowEmpty().DefaultValue(_config.Pool.Password ?? "")));
                     break;
 
@@ -57,7 +57,7 @@ public sealed class SettingsScreen
                     _config.Electricity.PricePerKwh = AnsiConsole.Prompt(
                         new TextPrompt<double>("Default price per kWh:").DefaultValue(_config.Electricity.PricePerKwh));
                     _config.Electricity.Currency = AnsiConsole.Prompt(
-                        new TextPrompt<string>("Currency code (used for the price feed too):").DefaultValue(_config.Electricity.Currency)).ToUpperInvariant();
+                        UiHelpers.Text("Currency code (used for the price feed too):").DefaultValue(_config.Electricity.Currency)).ToUpperInvariant();
                     break;
 
                 case "Refresh interval":

@@ -100,22 +100,21 @@ public sealed class NodesScreen
             return;
         }
 
-        var labels = selectable.ToDictionary(
-            m => $"{m.Name} - {m.Address} [{m.Os}] {(m.Online ? "online" : "offline")}",
-            m => m);
-
-        var picked = AnsiConsole.Prompt(new MultiSelectionPrompt<string>()
+        var picked = AnsiConsole.Prompt(new MultiSelectionPrompt<TailnetMachine>()
             .Title("Machines to add as mining nodes")
             .PageSize(15)
             .NotRequired()
             .InstructionsText("[grey](space to toggle, enter to confirm)[/]")
-            .AddChoices(labels.Keys));
+            // Hostnames and the OS name come from tailscale; escaped because the prompt
+            // renders choices as markup and "[windows]" would be read as a style tag.
+            .UseConverter(m => UiHelpers.Escape(
+                $"{m.Name} - {m.Address} [{m.Os}] {(m.Online ? "online" : "offline")}"))
+            .AddChoices(selectable));
 
         if (picked.Count == 0) return;
 
-        foreach (var label in picked)
+        foreach (var machine in picked)
         {
-            var machine = labels[label];
             _config.Nodes.Add(new NodeConfig
             {
                 Name = machine.Name,
@@ -133,7 +132,7 @@ public sealed class NodesScreen
     {
         UiHelpers.Header("Add node");
 
-        var name = AnsiConsole.Prompt(new TextPrompt<string>("Name:").Validate(v =>
+        var name = AnsiConsole.Prompt(UiHelpers.Text("Name:").Validate(v =>
             _config.FindNode(v) is null ? ValidationResult.Success() : ValidationResult.Error("[red]That name is taken[/]")));
         var host = AnsiConsole.Ask<string>("Tailscale IP or MagicDNS name:");
         var port = AnsiConsole.Prompt(new TextPrompt<int>("Agent port:").DefaultValue(_config.AgentPort));
@@ -164,10 +163,10 @@ public sealed class NodesScreen
 
         UiHelpers.Header($"Edit {node.Name}");
 
-        node.Host = AnsiConsole.Prompt(new TextPrompt<string>("Host:").DefaultValue(node.Host));
+        node.Host = AnsiConsole.Prompt(UiHelpers.Text("Host:").DefaultValue(node.Host));
         node.Port = AnsiConsole.Prompt(new TextPrompt<int>("Agent port:").DefaultValue(node.Port));
         node.MinerPath = NullIfBlank(AnsiConsole.Prompt(
-            new TextPrompt<string>("xmrig directory on that node:").AllowEmpty().DefaultValue(node.MinerPath ?? "")));
+            UiHelpers.Text("xmrig directory on that node:").AllowEmpty().DefaultValue(node.MinerPath ?? "")));
 
         var watts = AnsiConsole.Prompt(new TextPrompt<double>("Fallback watts (0 = none):").DefaultValue(node.PowerFallbackWatts ?? 0));
         node.PowerFallbackWatts = watts > 0 ? watts : null;
@@ -179,7 +178,7 @@ public sealed class NodesScreen
         node.PricePerKwh = rate > 0 ? rate : null;
 
         node.Token = NullIfBlank(AnsiConsole.Prompt(
-            new TextPrompt<string>("Token override (blank uses the fleet token):").AllowEmpty().DefaultValue(node.Token ?? "")));
+            UiHelpers.Text("Token override (blank uses the fleet token):").AllowEmpty().DefaultValue(node.Token ?? "")));
 
         _config.Save();
 

@@ -73,8 +73,8 @@ public sealed class MinerScreen
         var defaultPath = nodes.Select(n => n.MinerPath).FirstOrDefault(p => !string.IsNullOrWhiteSpace(p))
                           ?? (OperatingSystem.IsWindows() ? @"C:\mining\xmrig" : "/opt/xmrig");
 
-        var targetPath = AnsiConsole.Prompt(new TextPrompt<string>("Install directory on the nodes:").DefaultValue(defaultPath));
-        var version = AnsiConsole.Prompt(new TextPrompt<string>("Release tag (or 'latest'):").DefaultValue("latest"));
+        var targetPath = AnsiConsole.Prompt(UiHelpers.Text("Install directory on the nodes:").DefaultValue(defaultPath));
+        var version = AnsiConsole.Prompt(UiHelpers.Text("Release tag (or 'latest'):").DefaultValue("latest"));
         var restart = AnsiConsole.Confirm("Restart the miner afterwards if it was running?", defaultValue: true);
 
         AnsiConsole.MarkupLine($"[grey]Each node downloads xmrig itself from GitHub, so it needs outbound internet.[/]");

@@ -56,6 +56,23 @@ public static class UiHelpers
         return $"[{colour}]{amount.Value:N2} {Escape(currency)}[/]";
     }
 
+    /// <summary>
+    /// A free-text prompt whose default value is safe to display.
+    ///
+    /// <see cref="TextPrompt{T}"/> renders its default as markup, so a path such as
+    /// <c>C:\mining\[rig]\xmrig</c> is read as a style tag and crashes the screen. Escaping
+    /// happens in the converter, which is display-only: the value handed back is still the
+    /// raw one the operator typed or accepted.
+    /// </summary>
+    public static TextPrompt<string> Text(string label) =>
+        new TextPrompt<string>(label).WithConverter(Escape);
+
+    // Prompt choices are rendered as markup, so a name carrying [ or ] would be read as a
+    // style tag and crash the prompt. Selecting the objects themselves and escaping only in
+    // the converter keeps the display safe without mangling the underlying value.
+    private static readonly NodeConfig BackChoice = new() { Name = "< back" };
+    private static readonly NodeConfig AllChoice = new() { Name = "* all enabled nodes" };
+
     /// <summary>Picks one node, or null when the fleet is empty or the user backs out.</summary>
     public static NodeConfig? SelectNode(FleetConfig config, string prompt = "Node")
     {
@@ -66,13 +83,13 @@ public static class UiHelpers
             return null;
         }
 
-        var choices = config.Nodes.Select(n => n.ToString()).Append("< back").ToList();
-        var picked = AnsiConsole.Prompt(new SelectionPrompt<string>()
+        var picked = AnsiConsole.Prompt(new SelectionPrompt<NodeConfig>()
             .Title(Escape(prompt))
             .PageSize(15)
-            .AddChoices(choices));
+            .UseConverter(n => ReferenceEquals(n, BackChoice) ? "< back" : Escape(n.ToString()))
+            .AddChoices(config.Nodes.Append(BackChoice)));
 
-        return picked == "< back" ? null : config.Nodes.FirstOrDefault(n => n.ToString() == picked);
+        return ReferenceEquals(picked, BackChoice) ? null : picked;
     }
 
     /// <summary>Picks any number of nodes; an empty result means the user chose nothing.</summary>
@@ -86,14 +103,15 @@ public static class UiHelpers
             return [];
         }
 
-        const string all = "* all enabled nodes";
-        var picked = AnsiConsole.Prompt(new MultiSelectionPrompt<string>()
+        var picked = AnsiConsole.Prompt(new MultiSelectionPrompt<NodeConfig>()
             .Title(Escape(prompt))
             .PageSize(15)
             .InstructionsText("[grey](space to toggle, enter to confirm)[/]")
-            .AddChoices(enabled.Select(n => n.ToString()).Prepend(all)));
+            .UseConverter(n => ReferenceEquals(n, AllChoice) ? "* all enabled nodes" : Escape(n.ToString()))
+            .AddChoices(enabled.Prepend(AllChoice)));
 
-        if (picked.Contains(all)) return enabled;
-        return enabled.Where(n => picked.Contains(n.ToString())).ToList();
+        return picked.Any(n => ReferenceEquals(n, AllChoice))
+            ? enabled
+            : picked.Where(n => !ReferenceEquals(n, AllChoice)).ToList();
     }
 }
