@@ -104,9 +104,13 @@ public sealed class PerformanceCounterPump : BackgroundService
         {
             // Normal shutdown.
         }
-        catch (DllNotFoundException ex)
+        catch (Exception ex)
         {
-            _log.LogWarning(ex, "pdh.dll is unavailable; performance counter polling is off.");
+            // Everything is caught on purpose. An unhandled exception in a BackgroundService
+            // stops the whole host by default, and this service only makes mining faster - it
+            // must never be the reason a node stops answering the console. P/Invoke into a
+            // missing or differently-shaped pdh.dll would otherwise do exactly that.
+            _log.LogWarning(ex, "Performance counter polling is off; mining continues, possibly below this CPU's rate.");
         }
         finally
         {
