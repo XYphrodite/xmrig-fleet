@@ -16,6 +16,15 @@ public sealed class AgentOptions
 
     /// <summary>Start the miner as soon as the agent starts.</summary>
     public bool AutoStartMiner { get; set; }
+
+    /// <summary>
+    /// Keep Windows' performance-counter subsystem polled. Measured worth +62% hashrate on an
+    /// i7-12700KF; see <see cref="PerformanceCounterPump"/> for what this is and why it exists.
+    /// </summary>
+    public bool PollPerformanceCounters { get; set; } = true;
+
+    /// <summary>How often the counter query is collected. One second matches what Task Manager does.</summary>
+    public int PerformanceCounterIntervalMs { get; set; } = 1000;
 }
 
 /// <summary>

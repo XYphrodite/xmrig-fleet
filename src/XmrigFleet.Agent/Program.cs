@@ -25,6 +25,7 @@ builder.Services.AddSingleton<MinerService>();
 builder.Services.AddSingleton<HardwareService>();
 builder.Services.AddSingleton<InstallerService>();
 builder.Services.AddSingleton<AgentUpdateService>();
+builder.Services.AddHostedService<PerformanceCounterPump>();
 builder.Services.AddHttpClient("github", client =>
 {
     // The GitHub API rejects requests without a User-Agent.

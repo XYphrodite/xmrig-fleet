@@ -151,6 +151,7 @@ hardware.
 | `HardwareService` | LibreHardwareMonitor sensors, power estimate, PawnIO diagnostics |
 | `InstallerService` | Resolve the right GitHub release asset, download, unpack, repoint the config |
 | `AgentUpdateService` | Update the agent itself from an xmrig-fleet release and restart into it |
+| `PerformanceCounterPump` | Keeps Windows' performance counters polled, which is worth +62% hashrate on a hybrid CPU |
 | `MinerConfigStore` | Durable per-node miner settings |
 
 ### 2. **XmrigFleet.Console**
@@ -448,6 +449,14 @@ xmrig-fleet/
   and check `CodeIntegrity/Operational` event 3033 if a driver is blocked.
 - **Pushing pool settings does not restart the miner**; the operator must restart it for
   new settings to apply.
+- **A hybrid CPU mines at roughly 60% of its rate unless something polls Windows'
+  performance counters.** Measured on an i7-12700KF: 4,380 H/s with nothing watching against
+  7,092 H/s with Task Manager open and 7,097 H/s with Resource Monitor open - the two agree
+  to within a tenth of a percent, so it is the counter subsystem, not either application.
+  Huge pages, free memory, competing processes, xmrig's priority, the High Performance power
+  plan, a 1 ms timer resolution and opting out of EcoQoS were each ruled out by a controlled
+  A/B on the same node. `PerformanceCounterPump` now does the polling from the agent; the
+  underlying cause is still unexplained, so this is a working remedy, not a diagnosis.
 - **A node that loses its huge pages runs several times slower with no other symptom.**
   Measured on the Xeon E5-2680 v4: 5.97 kH/s at 100% allocation against 1.34 kH/s at 11%,
   a 4.5x swing from memory fragmentation alone. The `Pages` column now exposes it; the
