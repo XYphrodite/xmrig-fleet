@@ -25,6 +25,7 @@ builder.Services.AddSingleton<MinerService>();
 builder.Services.AddSingleton<HardwareService>();
 builder.Services.AddSingleton<InstallerService>();
 builder.Services.AddSingleton<AgentUpdateService>();
+builder.Services.AddSingleton<SessionMonitorService>();
 builder.Services.AddHostedService<PerformanceCounterPump>();
 builder.Services.AddHttpClient("github", client =>
 {
@@ -99,7 +100,16 @@ api.MapPost("/miner/restart", (MinerService miner, CancellationToken ct) => mine
 api.MapGet("/hardware", (HardwareService hw, CancellationToken ct) => hw.ReadAsync(ct));
 
 api.MapGet("/config", (MinerConfigStore store) => store.Current);
-api.MapPut("/config", (MinerConfigDto patch, MinerConfigStore store) => store.Update(patch));
+api.MapPut("/config", (MinerConfigDto patch, MinerConfigStore store, SessionMonitorService monitor) =>
+{
+    var saved = store.Update(patch);
+
+    // Only act when the push actually carried the flag: a pool-settings push leaves it null and
+    // must not silently tear down a node's session monitor.
+    if (patch.KeepMonitorOpen is { } wanted) monitor.Apply(wanted);
+
+    return saved;
+});
 
 api.MapPost("/install", (InstallRequestDto request, InstallerService installer, CancellationToken ct) =>
     installer.InstallAsync(request, ct));

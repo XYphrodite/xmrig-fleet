@@ -29,6 +29,7 @@ public sealed class MinerScreen
                     "Restart mining",
                     "Install / update xmrig",
                     "Push pool settings to nodes",
+                    "Session monitor (hashrate workaround)",
                     "View miner log",
                     "< back"));
 
@@ -39,6 +40,7 @@ public sealed class MinerScreen
                 case "Restart mining": await RunAsync("Restarting", (c, t) => c.RestartAsync(t), ct); break;
                 case "Install / update xmrig": await InstallAsync(ct); break;
                 case "Push pool settings to nodes": await PushAsync(ct); break;
+                case "Session monitor (hashrate workaround)": await SessionMonitorAsync(ct); break;
                 case "View miner log": await LogsAsync(ct); break;
                 default: return;
             }
@@ -130,6 +132,62 @@ public sealed class MinerScreen
         foreach (var node in nodes) node.MinerPath = targetPath;
         _config.Save();
 
+        UiHelpers.Pause();
+    }
+
+    /// <summary>
+    /// Turns the Task Manager workaround on or off per node. Presented with its own measurement
+    /// and its own catch, because an operator switching this on deserves to know both that it is
+    /// worth 62% and that nobody can explain why.
+    /// </summary>
+    private async Task SessionMonitorAsync(CancellationToken ct)
+    {
+        UiHelpers.Header("Session monitor");
+
+        AnsiConsole.MarkupLine(
+            "Keeps Task Manager open, minimised, in the node's own logged-on session.");
+        AnsiConsole.MarkupLine(
+            "[grey]Measured on an i7-12700KF: 4,380 H/s with nothing watching, 7,092 H/s with[/]");
+        AnsiConsole.MarkupLine(
+            "[grey]Task Manager open. Eleven explanations were tested and none held, so this is[/]");
+        AnsiConsole.MarkupLine(
+            "[grey]a remedy without a diagnosis - it may stop working after a Windows update.[/]");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine(
+            "[yellow]The task runs at logon[/], so a node that reboots without an automatic logon loses it.");
+        AnsiConsole.WriteLine();
+
+        var nodes = UiHelpers.SelectNodes(_config, "Change which nodes?");
+        if (nodes.Count == 0) return;
+
+        var enable = AnsiConsole.Prompt(
+            new SelectionPrompt<string>().Title("Session monitor should be").AddChoices("on", "off"))
+            == "on";
+
+        var results = new List<(string Node, bool Ok, string Message)>();
+        await AnsiConsole.Status().StartAsync(enable ? "Enabling..." : "Disabling...", async _ =>
+        {
+            var tasks = nodes.Select(async node =>
+            {
+                using var client = _fleet.CreateClient(node, TimeSpan.FromSeconds(60));
+                try
+                {
+                    var pushed = await client.PutConfigAsync(new MinerConfigDto { KeepMonitorOpen = enable }, ct);
+                    lock (results) results.Add((node.Name, pushed is not null, enable ? "session monitor on" : "session monitor off"));
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+                {
+                    lock (results) results.Add((node.Name, false, ex.Message));
+                }
+            });
+            await Task.WhenAll(tasks);
+        });
+
+        foreach (var (name, ok, message) in results.OrderBy(r => r.Node, StringComparer.OrdinalIgnoreCase))
+            UiHelpers.Result(ok, $"{name}: {message}");
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]Give it a minute, then check the dashboard: the change is not instant.[/]");
         UiHelpers.Pause();
     }
 

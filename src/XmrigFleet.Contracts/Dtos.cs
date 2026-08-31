@@ -102,6 +102,19 @@ public sealed record MinerConfigDto
     public string[]? ExtraArgs { get; init; }
     /// <summary>Watts to assume for this machine when no power sensor is available.</summary>
     public double? PowerFallbackWatts { get; init; }
+
+    /// <summary>
+    /// Keep Task Manager running minimised in the node's interactive session.
+    ///
+    /// This is a remedy without a diagnosis, and it is worth saying so plainly: on an
+    /// i7-12700KF the miner runs at 4,380 H/s with nothing watching and 7,092 H/s with Task
+    /// Manager open - a 62% difference that survived eleven attempts to explain it away.
+    /// Whatever Windows does differently, it needs a monitor window in a logged-on session;
+    /// polling the same counters from the agent's own service achieved nothing.
+    ///
+    /// Null leaves the node's current setting alone, which is what a pool-settings push sends.
+    /// </summary>
+    public bool? KeepMonitorOpen { get; init; }
 }
 
 /// <summary>Install or update xmrig. Either give an explicit <see cref="DownloadUrl"/> or a GitHub release tag.</summary>

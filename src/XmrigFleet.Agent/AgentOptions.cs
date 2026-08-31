@@ -104,6 +104,7 @@ public sealed class MinerConfigStore
                 Password = patch.Password ?? _current.Password,
                 ExtraArgs = patch.ExtraArgs ?? _current.ExtraArgs,
                 PowerFallbackWatts = patch.PowerFallbackWatts ?? _current.PowerFallbackWatts,
+                KeepMonitorOpen = patch.KeepMonitorOpen ?? _current.KeepMonitorOpen,
             };
             Save(_current);
             return _current;
