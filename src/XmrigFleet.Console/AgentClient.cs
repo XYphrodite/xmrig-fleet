@@ -55,14 +55,37 @@ public sealed class AgentClient : IDisposable
     /// <summary>Downloads and unpacks xmrig on the node. Slow, so it gets its own long timeout.</summary>
     public async Task<InstallResultDto?> InstallAsync(InstallRequestDto request, CancellationToken ct)
     {
+        using var http = LongRunning();
         using var message = new HttpRequestMessage(HttpMethod.Post, "install")
         {
             Content = JsonContent.Create(request, options: JsonOptions),
         };
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromMinutes(6));
-        using var response = await _http.SendAsync(message, cts.Token);
-        return await response.Content.ReadFromJsonAsync<InstallResultDto>(JsonOptions, cts.Token);
+        using var response = await http.SendAsync(message, ct);
+        return await response.Content.ReadFromJsonAsync<InstallResultDto>(JsonOptions, ct);
+    }
+
+    /// <summary>
+    /// A client for calls that take minutes rather than seconds.
+    ///
+    /// HttpClient.Timeout covers the whole request and cannot be raised per call, so extending
+    /// only the CancellationToken achieves nothing: the eight-second default fires first and
+    /// kills the transfer mid-download. That is exactly how `upgrade-agents` failed on every
+    /// node while the same request, made by hand with a longer timeout, succeeded. Slow calls
+    /// own their timeout here instead of trusting whoever constructed this client to have
+    /// guessed it right.
+    /// </summary>
+    private HttpClient LongRunning()
+    {
+        var http = new HttpClient(new HttpClientHandler { UseProxy = false })
+        {
+            BaseAddress = _http.BaseAddress,
+            Timeout = TimeSpan.FromMinutes(10),
+        };
+
+        foreach (var header in _http.DefaultRequestHeaders)
+            http.DefaultRequestHeaders.TryAddWithoutValidation(header.Key, header.Value);
+
+        return http;
     }
 
     /// <summary>
@@ -76,9 +99,8 @@ public sealed class AgentClient : IDisposable
         {
             Content = JsonContent.Create(request, options: JsonOptions),
         };
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromMinutes(6));
-        using var response = await _http.SendAsync(message, cts.Token);
+        using var http = LongRunning();
+        using var response = await http.SendAsync(message, ct);
 
         // An agent from before this feature has no such route and answers 404 with an empty
         // body. During a roll-out that is the normal case, not an error worth a stack trace,
@@ -92,7 +114,7 @@ public sealed class AgentClient : IDisposable
         if (!response.IsSuccessStatusCode)
             return new AgentUpdateResultDto(false, $"the agent returned HTTP {(int)response.StatusCode}", null, null, false);
 
-        return await response.Content.ReadFromJsonAsync<AgentUpdateResultDto>(JsonOptions, cts.Token);
+        return await response.Content.ReadFromJsonAsync<AgentUpdateResultDto>(JsonOptions, ct);
     }
 
     private async Task<CommandResultDto?> PostAsync(string path, CancellationToken ct)
