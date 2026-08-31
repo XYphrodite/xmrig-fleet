@@ -176,7 +176,7 @@ public static class Cli
                 if (!result.Ok) { failures++; continue; }
                 if (!result.Restarting) continue;
 
-                if (await WaitForAgentAsync(fleet, node, ct) is { } after)
+                if (await WaitForAgentAsync(fleet, node, before, ct) is { } after)
                     AnsiConsole.MarkupLine($"  [green]back up[/] on {UiHelpers.Escape(after.AgentVersion)}");
                 else
                 {
@@ -189,7 +189,7 @@ public static class Cli
                 // The agent can drop the connection while swapping itself; that is not a failure
                 // on its own, so fall through to the same wait-and-verify path.
                 AnsiConsole.MarkupLine($"  [grey]connection closed during the swap, waiting for the restart...[/]");
-                if (await WaitForAgentAsync(fleet, node, ct) is { } after)
+                if (await WaitForAgentAsync(fleet, node, before, ct) is { } after)
                     AnsiConsole.MarkupLine($"  [green]back up[/] on {UiHelpers.Escape(after.AgentVersion)}");
                 else
                 {
@@ -202,17 +202,26 @@ public static class Cli
         return failures == 0 ? 0 : 1;
     }
 
-    /// <summary>Polls a node until its agent answers again, for as long as the restart should take.</summary>
-    private static async Task<AgentInfoDto?> WaitForAgentAsync(FleetService fleet, NodeConfig node, CancellationToken ct)
+    /// <summary>
+    /// Waits for the node to come back on the <em>new</em> build. An answer alone proves nothing:
+    /// the outgoing process keeps serving for a couple of seconds after it has written the new
+    /// files, so a naive wait reports the old version as "back up" and a successful roll-out looks
+    /// like a failed one. A restarted agent gives itself away by its uptime resetting.
+    /// </summary>
+    private static async Task<AgentInfoDto?> WaitForAgentAsync(FleetService fleet, NodeConfig node, AgentInfoDto? before, CancellationToken ct)
     {
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(90);
-        while (DateTime.UtcNow < deadline)
+        var started = DateTime.UtcNow;
+        while (DateTime.UtcNow - started < TimeSpan.FromSeconds(120))
         {
             await Task.Delay(TimeSpan.FromSeconds(3), ct);
             try
             {
                 using var client = fleet.CreateClient(node, TimeSpan.FromSeconds(5));
-                if (await client.GetInfoAsync(ct) is { } info) return info;
+                if (await client.GetInfoAsync(ct) is not { } info) continue;
+
+                var youngerThanThisWait = info.AgentUptimeSeconds < (DateTime.UtcNow - started).TotalSeconds + 5;
+                var versionMoved = before is not null && info.AgentVersion != before.AgentVersion;
+                if (youngerThanThisWait || versionMoved) return info;
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
             {

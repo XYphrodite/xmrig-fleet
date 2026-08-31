@@ -31,6 +31,13 @@ builder.Services.AddHttpClient("github", client =>
     // The GitHub API rejects requests without a User-Agent.
     client.DefaultRequestHeaders.UserAgent.ParseAdd("xmrig-fleet-agent");
     client.Timeout = TimeSpan.FromMinutes(5);
+})
+.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    // A VPN client on the node had left a per-user proxy on 127.0.0.1 that swallows the agent's
+    // traffic; the console and the xmrig API reader already bypass it for the same reason. The
+    // agent runs as a service, so it must not inherit a proxy meant for an interactive session.
+    UseProxy = false,
 });
 
 var options = builder.Configuration.GetSection("Agent").Get<AgentOptions>() ?? new AgentOptions();
