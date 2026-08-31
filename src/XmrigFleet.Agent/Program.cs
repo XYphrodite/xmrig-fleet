@@ -19,6 +19,14 @@ var basePath = AppContext.BaseDirectory;
 builder.Host.UseWindowsService(options => options.ServiceName = "xmrig-fleet-agent");
 builder.Host.UseSystemd();
 
+// UseWindowsService installs the event-log provider, which throws out of ILogger.Log when the
+// Event Log service is unreachable. On one node it answers "RPC server unavailable", and the
+// agent died mid-warning - twice - leaving a machine that had to be visited in person. Logging
+// must never be able to do that, so the provider goes and a file beside the binary takes over.
+builder.Logging.ClearProviders();
+builder.Logging.AddSimpleConsole(options => options.SingleLine = true);
+builder.Logging.AddProvider(new FileLoggerProvider(Path.Combine(basePath, "agent.log")));
+
 builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection("Agent"));
 builder.Services.AddSingleton(new MinerConfigStore(basePath));
 builder.Services.AddSingleton<MinerService>();
@@ -32,14 +40,12 @@ builder.Services.AddHttpClient("github", client =>
     // The GitHub API rejects requests without a User-Agent.
     client.DefaultRequestHeaders.UserAgent.ParseAdd("xmrig-fleet-agent");
     client.Timeout = TimeSpan.FromMinutes(5);
-})
-.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-{
-    // A VPN client on the node had left a per-user proxy on 127.0.0.1 that swallows the agent's
-    // traffic; the console and the xmrig API reader already bypass it for the same reason. The
-    // agent runs as a service, so it must not inherit a proxy meant for an interactive session.
-    UseProxy = false,
 });
+// Deliberately left on the system proxy. Bypassing it looked right - the console and the xmrig
+// API reader both bypass it, because tailnet addresses must never go through a VPN client - but
+// those are local addresses. GitHub is not: on desktop-ib88isg the proxy is the only route out,
+// and disabling it turned every self-update into "cannot connect to github.com:443". A node that
+// reaches GitHub directly loses nothing by having a proxy configured it does not need.
 
 var options = builder.Configuration.GetSection("Agent").Get<AgentOptions>() ?? new AgentOptions();
 builder.WebHost.UseUrls(options.ListenUrl);
