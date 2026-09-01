@@ -29,6 +29,18 @@ public sealed class ThrottleService : BackgroundService
     private readonly ThrottleLadder _ladder = new();
     private readonly object _gate = new();
 
+    /// <summary>
+    /// How much of the whole machine the miner takes at full speed, and the process it was worked
+    /// out for. See <see cref="FullShareAsync"/>.
+    ///
+    /// The ladder is a share of the miner; a job object's limit is a share of the machine. They
+    /// are not the same number - six mining threads on twelve logical CPUs come to about 50% - and
+    /// without the conversion "hold it to 50%" is a cap the miner never reaches. Measured on a
+    /// 12-thread node: pinning 50% changed the hashrate by nothing at all.
+    /// </summary>
+    private double? _minerFullShare;
+    private int _fullSharePid;
+
     private SystemLoad _lastLoad;
     private bool _wasEnabled;
     private DateTimeOffset _lastStartComplaint = DateTimeOffset.MinValue;
@@ -150,6 +162,43 @@ public sealed class ThrottleService : BackgroundService
         }
     }
 
+    /// <summary>
+    /// How much of the machine the miner takes at full speed, as a percentage.
+    ///
+    /// Taken from its thread count rather than from watching it, because watching does not work
+    /// here: the only samples that show a miner's appetite are the ones taken while it is
+    /// uncapped, and once a cap is on there are none - the reading is then the cap. A service
+    /// that put a cap on early would be stuck with whatever it had guessed by then, for as long
+    /// as the miner kept running.
+    ///
+    /// A RandomX thread sits at a full logical CPU, so threads over logical CPUs is what the
+    /// miner asks for: six threads on twelve CPUs measured at almost exactly the 50% this returns.
+    /// Asked of the miner once per process, over loopback.
+    /// </summary>
+    private async Task<double> FullShareAsync(int pid, CancellationToken ct)
+    {
+        if (_fullSharePid == pid && _minerFullShare is { } cached) return cached;
+
+        var threads = (await _miner.GetStatusAsync(ct)).MiningThreads;
+        var cores = Environment.ProcessorCount;
+
+        if (threads is not > 0 || cores <= 0)
+        {
+            // The miner's API is unreachable. Capping as a share of the machine is wrong, but it
+            // is wrong in the direction of limiting too hard, and this service exists to get out
+            // of somebody's way. Not cached, so the next tick asks again.
+            _log.LogDebug("Throttle: miner did not report its thread count; limiting by machine share");
+            return 100;
+        }
+
+        var share = Math.Clamp(100.0 * threads.Value / cores, 1, 100);
+        (_fullSharePid, _minerFullShare) = (pid, share);
+        _log.LogInformation("Throttle: the miner takes {Share:0}% of this machine at full speed ({Threads} threads on {Cores} CPUs)",
+            share, threads.Value, cores);
+
+        return share;
+    }
+
     private async Task ApplyAsync(int level, string reason, CancellationToken ct)
     {
         var stoppedByUs = _config.Current.MinerStoppedByThrottle == true;
@@ -187,7 +236,7 @@ public sealed class ThrottleService : BackgroundService
 
         if (_limit.AppliedLevel == level) return;
 
-        if (_limit.Apply(pid.Value, level, out var detail)) return;
+        if (_limit.Apply(pid.Value, level, await FullShareAsync(pid.Value, ct), out var detail)) return;
 
         // Retried every tick rather than given up on, because the usual cause - the miner having
         // just restarted under a new pid - fixes itself. The complaint is rate limited so a node
@@ -211,7 +260,7 @@ public sealed class ThrottleService : BackgroundService
 
         try
         {
-            if (_miner.RunningPid() is { } pid && _limit.Apply(pid, 100, out var detail))
+            if (_miner.RunningPid() is { } pid && _limit.Apply(pid, 100, 100, out var detail))
                 _log.LogInformation("Throttle: {Detail} on the way out", detail);
         }
         catch (Exception ex)
@@ -225,7 +274,7 @@ public sealed class ThrottleService : BackgroundService
     {
         _wasEnabled = false;
 
-        if (_miner.RunningPid() is { } pid) _limit.Apply(pid, 100, out _);
+        if (_miner.RunningPid() is { } pid) _limit.Apply(pid, 100, 100, out _);
         _ladder.Force(100, "throttling is off", DateTimeOffset.UtcNow);
 
         if (_config.Current.MinerStoppedByThrottle == true) await ResumeAsync("throttling is off", ct);
@@ -250,6 +299,8 @@ public sealed class ThrottleService : BackgroundService
             // The miner's accumulated CPU time restarts from zero with the new process; without
             // this the next sample counts its own spin-up as somebody else's load.
             _loadReader.Reset();
+            // A new process may have a different thread count, so its appetite is measured afresh.
+            (_minerFullShare, _fullSharePid) = (null, 0);
             _log.LogInformation("Throttle: started the miner again ({Reason})", reason);
             return true;
         }

@@ -176,6 +176,25 @@ public class ThrottleTests
     }
 
     [Fact]
+    public void A_rung_means_a_share_of_the_miner_not_a_share_of_the_machine()
+    {
+        // Six mining threads on twelve logical CPUs: the miner wants half the machine. Holding it
+        // to half speed therefore means a quarter of the machine, and a cap of half would be one
+        // the miner never reaches. Measured on exactly that node: pinning 50% before this
+        // conversion existed changed the hashrate by nothing.
+        Assert.Equal(25, MinerCpuLimit.MachineRateFor(level: 50, minerFullSharePercent: 50));
+        Assert.Equal(12, MinerCpuLimit.MachineRateFor(level: 25, minerFullSharePercent: 50));
+        Assert.Equal(38, MinerCpuLimit.MachineRateFor(level: 75, minerFullSharePercent: 50));
+
+        // A miner that really does want the whole machine is capped at the rung itself.
+        Assert.Equal(25, MinerCpuLimit.MachineRateFor(level: 25, minerFullSharePercent: 100));
+
+        // Never zero: a job object rate of zero is not a legal cap, and a stopped miner is the
+        // other mechanism's job.
+        Assert.Equal(1, MinerCpuLimit.MachineRateFor(level: 1, minerFullSharePercent: 1));
+    }
+
+    [Fact]
     public void The_first_load_sample_is_not_usable()
     {
         // A CPU percentage is the difference between two samples. Handing the ladder a zero here

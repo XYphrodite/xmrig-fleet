@@ -443,7 +443,12 @@ xmrig-fleet/
 
 ### Implemented, Not Yet Verified Live ⏳
 - [ ] **Adaptive power limit.** Five rungs (100/75/50/25/0) chosen from the CPU load of everything
-      except the miner. 25-100% is a hard cap on a named job object, applied instantly and leaving
+      except the miner. A rung is a share of the **miner's own full speed**, not of the machine:
+      six mining threads on twelve logical CPUs want about half the machine, so a job object told
+      to allow 50% would be a cap the miner never reaches. Measured on that node before the
+      conversion existed — pinning 50% moved the hashrate by nothing — so the agent asks the miner
+      for its thread count and converts. 25-100% is a hard cap on a named job object, applied
+      instantly and leaving
       the RandomX dataset and huge pages untouched; 0% stops the miner outright, because a capped
       miner still holds ~2.3 GB and on a 16 GB node that memory is what makes the machine feel
       slow. Coming down is immediate, going up waits for `rampUpSeconds` of quiet. Rules live in

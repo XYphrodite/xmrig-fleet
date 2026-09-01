@@ -51,12 +51,22 @@ public sealed class MinerCpuLimit : IDisposable
     public int AppliedLevel { get { lock (_gate) return _appliedLevel; } }
 
     /// <summary>
-    /// Holds <paramref name="pid"/> to <paramref name="level"/> percent of the machine's CPU.
-    /// A level of 100 lifts the cap. Returns false with a reason when the limit could not be set.
+    /// Holds <paramref name="pid"/> to <paramref name="level"/> percent of the speed it runs at
+    /// unthrottled. A level of 100 lifts the cap.
     /// </summary>
-    public bool Apply(int pid, int level, out string detail)
+    /// <param name="minerFullSharePercent">
+    /// How much of the whole machine the miner takes when nothing is holding it back, measured.
+    ///
+    /// The translation is the whole reason this parameter exists. A job object's rate is a share
+    /// of the entire machine, but a miner is not the entire machine: six mining threads on twelve
+    /// logical CPUs come to about 50%. Passing the level straight through would make "hold it to
+    /// 50%" a cap the miner never reaches, and three rungs of a five-rung ladder would silently do
+    /// nothing at all - which is exactly what a measurement on a 12-thread node showed.
+    /// </param>
+    public bool Apply(int pid, int level, double minerFullSharePercent, out string detail)
     {
         level = Math.Clamp(level, 1, 100);
+        var machineRate = MachineRateFor(level, minerFullSharePercent);
 
         if (!OperatingSystem.IsWindows())
         {
@@ -79,8 +89,8 @@ public sealed class MinerCpuLimit : IDisposable
                     : new JobCpuRateControlInformation
                     {
                         ControlFlags = CpuRateControlEnable | CpuRateControlHardCap,
-                        // Expressed in hundredths of a percent, so 25% is 2500.
-                        CpuRate = (uint)(level * 100),
+                        // Expressed in hundredths of a percent, so 25% of the machine is 2500.
+                        CpuRate = (uint)(machineRate * 100),
                     };
 
                 if (!SetInformationJobObject(_job, JobObjectCpuRateControlInformation, ref info, Marshal.SizeOf<JobCpuRateControlInformation>()))
@@ -90,7 +100,9 @@ public sealed class MinerCpuLimit : IDisposable
                 }
 
                 _appliedLevel = level;
-                detail = level >= 100 ? "limit lifted" : $"capped at {level}%";
+                detail = level >= 100
+                    ? "limit lifted"
+                    : $"held at {level}% of full speed ({machineRate}% of the machine)";
                 return true;
             }
             catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
@@ -99,6 +111,21 @@ public sealed class MinerCpuLimit : IDisposable
                 return false;
             }
         }
+    }
+
+    /// <summary>
+    /// Turns a rung of the ladder into the share of the machine a job object understands.
+    ///
+    /// A miner asking for half the machine and told to run at half speed must be capped at a
+    /// quarter of the machine, not a half - a half would be a limit it never reaches. Getting this
+    /// backwards is not a subtle error: it makes the top of the ladder do nothing while still
+    /// reporting that it did something.
+    /// </summary>
+    public static int MachineRateFor(int level, double minerFullSharePercent)
+    {
+        var share = Math.Clamp(minerFullSharePercent, 1, 100);
+        // At least 1: the rate is expressed in hundredths of a percent and zero is not a legal cap.
+        return Math.Clamp((int)Math.Round(Math.Clamp(level, 1, 100) * share / 100.0), 1, 100);
     }
 
     /// <summary>Called when the miner stops, so the next start is assigned and capped afresh.</summary>
