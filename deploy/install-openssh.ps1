@@ -22,7 +22,8 @@
     Run this in an elevated PowerShell on the node. It can also be run straight from the
     web, which avoids the execution policy that blocks a downloaded .ps1 file:
 
-        $env:XMRIG_FLEET_SSH_KEY = 'ssh-ed25519 AAAA... operator'
+        $env:XMRIG_FLEET_SSH_KEY  = 'ssh-ed25519 AAAA... operator'
+        $env:XMRIG_FLEET_SSH_USER = 'local'
         irm https://raw.githubusercontent.com/XYphrodite/xmrig-fleet/master/deploy/install-openssh.ps1 | iex
 
     Nothing here touches xmrig or the fleet agent: installing SSH does not interrupt
@@ -38,8 +39,9 @@ param(
     # pass arguments.
     [string]$PublicKey = $env:XMRIG_FLEET_SSH_KEY,
 
-    # Account the key logs in as. Defaults to whoever is running the script.
-    [string]$UserName = $env:USERNAME,
+    # Account the key logs in as. An elevated shell may be running as a different
+    # administrator than the one the operator logs in as, so this is worth naming.
+    [string]$UserName = $(if ($env:XMRIG_FLEET_SSH_USER) { $env:XMRIG_FLEET_SSH_USER } else { $env:USERNAME }),
 
     # Leave password authentication on. Off by default: see the description.
     [switch]$AllowPasswordAuth,
