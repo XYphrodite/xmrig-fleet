@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Http.Headers;
 using System.Reflection;
@@ -21,18 +22,17 @@ namespace XmrigFleet.Agent;
 ///    or truncated archive must fail loudly while the node still works, never half-installed.
 ///
 /// The running executable cannot be deleted, but it can be renamed, so each file is moved aside
-/// to <c>.old</c> before the new one is copied over. The process then exits with a non-zero code:
-/// install-agent.ps1 registers SCM failure actions (restart/5000/...), and the systemd unit sets
-/// Restart=always, so both service managers bring the new binary straight back up. The miner is a
-/// separate process and keeps hashing throughout.
+/// to <c>.old</c> before the new one is copied over. A detached helper then starts the service
+/// again and this process leaves cleanly - see <see cref="ScheduleRestart"/> for why not simply
+/// exiting non-zero. The miner is a separate process and keeps hashing throughout.
 /// </summary>
 public sealed class AgentUpdateService
 {
     private const string ReleasesApi = "https://api.github.com/repos/XYphrodite/xmrig-fleet/releases";
     private const string BackupSuffix = ".old";
 
-    /// <summary>Exit code the agent uses to ask its service manager for a restart.</summary>
-    private const int RestartExitCode = 3;
+    /// <summary>The Windows service this binary runs as; the restart helper needs the name.</summary>
+    private const string ServiceName = "xmrig-fleet-agent";
 
     /// <summary>Node-specific state that survives every update. See the class remarks.</summary>
     private static readonly string[] ProtectedFiles =
@@ -125,21 +125,33 @@ public sealed class AgentUpdateService
         }
     }
 
-    /// <summary>
-    /// Leaves long enough for the HTTP response to reach the console, then exits non-zero so the
-    /// service manager restarts the process on the freshly written binary.
-    ///
-    /// Deliberately a hard exit rather than IHostApplicationLifetime.StopApplication(): a
-    /// graceful shutdown returns exit code 0, which SCM reads as "this service was meant to
-    /// stop" and leaves the node dead until somebody visits it. Only a non-zero code triggers
-    /// the configured failure actions. Nothing here needs an orderly shutdown - the miner is a
-    /// separate process and the config is written synchronously.
-    /// </summary>
+    /// <summary>Leaves long enough for the HTTP response to reach the console, then hands over.</summary>
     private void ScheduleRestart() => _ = Task.Run(async () =>
     {
         await Task.Delay(TimeSpan.FromSeconds(2));
-        _log.LogWarning("Agent update: exiting with {Code} so the service manager restarts the new binary", RestartExitCode);
-        Environment.Exit(RestartExitCode);
+
+        // A detached helper starts the service again, and this process then leaves cleanly.
+        //
+        // Exiting non-zero also restarts it - SCM's failure actions see a crash and act - but
+        // that budget is only three deep and resets once a day, and every update spends one.
+        // The fourth update within 24 hours therefore left a node down with no way back in
+        // except a visit to the machine, which is exactly what this feature exists to avoid.
+        try
+        {
+            using var helper = Process.Start(new ProcessStartInfo("cmd.exe",
+                $"/c timeout /t 5 /nobreak > nul & sc start \"{ServiceName}\"")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+            });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            _log.LogError(ex, "Could not schedule the restart; the node may need starting by hand");
+        }
+
+        _log.LogWarning("Agent update: replaced, leaving so the new binary can take over");
+        Environment.Exit(0);
     });
 
     /// <summary>
