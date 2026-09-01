@@ -103,6 +103,12 @@ public sealed class SessionMonitorService : BackgroundService
                 return false;
             }
 
+            if (Adopt(session) is { } adopted)
+            {
+                detail = $"adopted the window already open in session {session} as pid {adopted}";
+                return true;
+            }
+
             var started = Launch(session, out detail);
             if (!started) _log.LogWarning("Session monitor could not start: {Detail}", detail);
             return started;
@@ -117,8 +123,11 @@ public sealed class SessionMonitorService : BackgroundService
 
             try
             {
-                // Only the window this service started: an operator who opened their own
-                // Task Manager should not have it closed from under them.
+                // Only the window this service is tracking, which since Adopt may be one it did
+                // not start. That trade is deliberate: turning the workaround off from the console
+                // has to actually stop it, or the operator is left with a setting that reads "off"
+                // over a node that is still being kept awake. The cost is that an operator sitting
+                // at the rig with their own Task Manager open loses it - they can reopen it.
                 using var process = Process.GetProcessById(_startedPid);
                 process.Kill();
                 _log.LogInformation("Session monitor stopped (pid {Pid})", _startedPid);
@@ -146,6 +155,45 @@ public sealed class SessionMonitorService : BackgroundService
             _startedPid = 0;
             return false;
         }
+    }
+
+    /// <summary>
+    /// Takes over a Task Manager already running in the target session, or null if there is none.
+    ///
+    /// The tracked pid lives in this process and nowhere else, so every agent restart - and the
+    /// self-update restarts on purpose - used to forget the window it had opened and start a
+    /// second one beside it. Four updates in an evening left four Task Managers on the node, and
+    /// the measurement they exist to produce had to be cleaned up by hand before it meant
+    /// anything. Adopting instead of launching keeps the count at one, whoever opened it.
+    /// </summary>
+    private int? Adopt(uint session)
+    {
+        try
+        {
+            var running = Process.GetProcessesByName("Taskmgr");
+            try
+            {
+                foreach (var process in running)
+                {
+                    if (process.SessionId != session) continue;
+
+                    _startedPid = process.Id;
+                    _log.LogInformation("Session monitor adopted the Task Manager already open in session {Session} (pid {Pid})", session, _startedPid);
+                    return _startedPid;
+                }
+            }
+            finally
+            {
+                foreach (var process in running) process.Dispose();
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
+        {
+            // A process that exits mid-enumeration is normal; fall through and launch one.
+            _log.LogDebug(ex, "Could not look for an existing Task Manager");
+        }
+
+        return null;
     }
 
     /// <summary>

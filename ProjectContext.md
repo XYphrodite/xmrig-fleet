@@ -152,7 +152,7 @@ hardware.
 | `InstallerService` | Resolve the right GitHub release asset, download, unpack, repoint the config |
 | `AgentUpdateService` | Update the agent itself from an xmrig-fleet release and restart into it |
 | `PerformanceCounterPump` | Polls Windows' performance counters. Tried as a fix for the hashrate gap below and did **not** work; kept only because it is harmless and rules the idea out |
-| `SessionMonitorService` | Creates or removes the scheduled task that keeps Task Manager open in the node's logged-on session |
+| `SessionMonitorService` | Keeps one hidden Task Manager in the node's logged-on session, launching it with `CreateProcessAsUser` and adopting one already open rather than starting a second |
 | `MinerConfigStore` | Durable per-node miner settings |
 
 ### 2. **XmrigFleet.Console**
