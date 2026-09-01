@@ -11,6 +11,11 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
     // Without this a `dotnet run` agent defaults to Development and answers errors with a
     // full stack trace, which would be served to anything on the tailnet that can reach it.
     EnvironmentName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? Environments.Production,
+    // Configuration follows the content root, which otherwise defaults to the current
+    // directory. Run the agent by hand from anywhere else and it silently reads no
+    // appsettings.json at all, then warns that its token is empty - which sends whoever is
+    // debugging after a missing secret that is in fact sitting right beside the binary.
+    ContentRootPath = AppContext.BaseDirectory,
 });
 var basePath = AppContext.BaseDirectory;
 
