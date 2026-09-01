@@ -394,6 +394,7 @@ xmrig-fleet/
 │   ├── release.ps1                # build, package and publish a GitHub release
 │   ├── publish.ps1                # self-contained publish for agent + console
 │   ├── install-agent.ps1          # service + firewall + verification on a node
+│   ├── install-openssh.ps1        # Windows OpenSSH server on a node, tailnet-scoped
 │   └── xmrig-fleet-agent.service  # systemd unit for Linux nodes
 ├── README.md                      # operator guide (Russian)
 ├── ProjectContext.md              # this document
@@ -476,6 +477,10 @@ xmrig-fleet/
 - [ ] Interactive TUI rendering in a real terminal (the development session had
       redirected output; the console correctly refuses and prints CLI usage instead)
 - [ ] `install-agent.ps1` service registration and firewall scoping on a clean node
+- [ ] `install-openssh.ps1` on `mks68i7rtx`. Its account/administrator detection was checked
+      against a live node — the group is named in Russian there, so membership is compared by
+      SID — but nothing has been installed yet. The node has no shell, which is why the Task
+      Manager entry-point failure on it is still undiagnosed
 - [ ] Linux agent: systemd unit, `linux-static-x64` install path, `/sys` sensors
 - [ ] Whether installing PawnIO actually restores CPU temperature and package power
 
