@@ -18,8 +18,13 @@ public sealed class AgentOptions
     public bool AutoStartMiner { get; set; }
 
     /// <summary>
-    /// Keep Windows' performance-counter subsystem polled. Measured worth +62% hashrate on an
-    /// i7-12700KF; see <see cref="PerformanceCounterPump"/> for what this is and why it exists.
+    /// Keep Windows' performance-counter subsystem polled.
+    ///
+    /// This buys nothing. It was tried as a way to reproduce the hashrate an open Task Manager
+    /// gives - see <see cref="PerformanceCounterPump"/> - and measured no effect at all. The +62%
+    /// belongs to the window, not to the polling, and the workaround that actually works is
+    /// <see cref="SessionMonitorService"/>. Kept on so the negative result stays reproducible;
+    /// turning it off is safe.
     /// </summary>
     public bool PollPerformanceCounters { get; set; } = true;
 

@@ -4,27 +4,33 @@ using Microsoft.Extensions.Options;
 namespace XmrigFleet.Agent;
 
 /// <summary>
-/// Keeps Windows' performance-counter subsystem polled, the way Task Manager and Resource
-/// Monitor do while their windows are open.
+/// A tested hypothesis that turned out to be wrong. It is kept so nobody tries it again, and
+/// this comment exists to stop the code being read as a remedy - which it is not.
 ///
-/// This looks like it does nothing with its results, and that is correct: the collection itself
-/// is the point. Measured on an i7-12700KF mining RandomX, with the miner otherwise untouched:
+/// The problem it was meant to solve: an i7-12700KF mines RandomX at 4,380 H/s with nothing
+/// watching and 7,092 H/s with Task Manager open, and 7,097 with Resource Monitor. The two
+/// monitors agreeing to within a tenth of a percent said the effect belonged to something they
+/// share rather than to either application, and the obvious shared thing is that both poll the
+/// performance-counter subsystem continuously. So: let the agent poll the same counters and the
+/// window becomes unnecessary.
 ///
-///     nothing watching counters   4 380 H/s   CPU load 51%   "100% of max frequency" absent
-///     Task Manager open           7 092 H/s   CPU load 60%
-///     Resource Monitor open       7 097 H/s   CPU load 60%
+/// It does not. Polling them from here changes the hashrate by nothing measurable. Whatever
+/// Windows does differently, it is not "somebody is reading these counters" - or not only that,
+/// because a service in session 0 reading them is evidently not the same as a window in the
+/// logged-on session reading them. That is why <see cref="SessionMonitorService"/> still keeps a
+/// real Task Manager open, and why it says in its own comments that it is a remedy without a
+/// diagnosis.
 ///
-/// The two monitors agree to within a tenth of a percent, so the effect belongs to the counter
-/// subsystem rather than to either application. The proximate cause looks like processor
-/// frequency management - Resource Monitor reports the package at 100% of maximum frequency
-/// exactly while it is open - but that part is inference, not measurement, and the fix does not
-/// depend on it being right.
+/// This was the ninth of eleven explanations tried and discarded, each by a controlled A/B on
+/// that node. The others: huge pages (constant at 1180/1180 throughout), free memory (20 GB
+/// spare either way), CPU frequency, competing processes (nothing above 0.5%), xmrig's own
+/// priority (worth +26% on its own, not this), the High Performance power plan, a 1 ms timer
+/// resolution, opting the process out of EcoQoS, Win32PrioritySeparation, and simply having a
+/// window open - a visible Notepad changes nothing.
 ///
-/// Ruled out first, each by a controlled A/B on the same node: huge pages (constant at
-/// 1180/1180 throughout), free memory (20 GB spare either way), competing processes (nothing
-/// above 0.5%), xmrig's own priority (worth +26% on its own, not this), the High Performance
-/// power plan (no effect), a 1 ms timer resolution (no effect), and opting the process out of
-/// EcoQoS power throttling (no effect).
+/// Left in the build rather than deleted because a negative result is worth keeping where the
+/// next person will look for it, and because polling three counters once a second costs nothing
+/// worth measuring. Switch it off with Agent:PollPerformanceCounters if that judgement is wrong.
 ///
 /// Counters are added by their English names through PdhAddEnglishCounter: the localised path a
 /// tool like typeperf expects fails outright on a non-English Windows, which is how this was
