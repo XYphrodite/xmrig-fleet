@@ -481,6 +481,21 @@ xmrig-fleet/
 - [ ] Automatic miner restart when a node reports zero hashrate while mining
 
 ### Known Issues / Risks ⚠️
+- **A CPU cap costs more hashrate than it saves CPU, and the penalty is mostly a fixed toll for
+  capping at all.** Measured on the i5 with the miner untouched between readings and its huge
+  pages intact throughout: 2,210 H/s uncapped, 610 at rung 50 (27.6%), 325 at rung 25 (14.7%),
+  and a clean recovery to 2,390 on release. Between 50 and 25 the fall is exactly proportional;
+  the step down from uncapped is not, and costs roughly 45% beyond it. The likely cause is cache:
+  a hard cap freezes the job's threads, RandomX wants 2 MB of scratchpad per thread, and six
+  threads on a 12 MB L3 fill it exactly - so anything else running evicts the lot during the
+  freeze. The practical consequence is that intermediate rungs are a poor trade (rung 75 gives up
+  ~59% of the hashrate to free a quarter of the miner's CPU time), and a two-rung ladder of full
+  speed and stopped is the honest shape unless fine control is really wanted.
+- **The ladder is read against the whole machine's CPU, which hides single-threaded work on a
+  many-core node.** One busy thread is 8% of a 12-thread node but 3.6% of the 28-thread Xeon, so
+  the same rung means different amounts of interference on different rigs, and on the Xeon a
+  person's single-threaded work may never move the miner at all. The decision log records busy
+  threads alongside the percentage so this can be corrected from readings rather than guesses.
 - **`stop` kills every `xmrig` process on the node**, including one an operator started
   by hand. Deliberate, but destructive if a node is shared.
 - **Hashrate is unreadable for a miner the agent did not start** — it holds its own API
