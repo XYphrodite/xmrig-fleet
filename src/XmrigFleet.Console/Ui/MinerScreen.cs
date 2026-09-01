@@ -30,6 +30,7 @@ public sealed class MinerScreen
                     "Install / update xmrig",
                     "Push pool settings to nodes",
                     "Session monitor (hashrate workaround)",
+                    "Power limit while the PC is in use",
                     "View miner log",
                     "< back"));
 
@@ -41,6 +42,7 @@ public sealed class MinerScreen
                 case "Install / update xmrig": await InstallAsync(ct); break;
                 case "Push pool settings to nodes": await PushAsync(ct); break;
                 case "Session monitor (hashrate workaround)": await SessionMonitorAsync(ct); break;
+                case "Power limit while the PC is in use": await ThrottleAsync(ct); break;
                 case "View miner log": await LogsAsync(ct); break;
                 default: return;
             }
@@ -154,7 +156,11 @@ public sealed class MinerScreen
             "[grey]a remedy without a diagnosis - it may stop working after a Windows update.[/]");
         AnsiConsole.WriteLine();
         AnsiConsole.MarkupLine(
-            "[yellow]The task runs at logon[/], so a node that reboots without an automatic logon loses it.");
+            "[yellow]Somebody has to be logged on[/] for this to work: with no session there is no");
+        AnsiConsole.MarkupLine(
+            "desktop to put the window on. The agent watches for one and starts it whenever a");
+        AnsiConsole.MarkupLine(
+            "person signs in, so a node that reboots picks it up again on its own.");
         AnsiConsole.WriteLine();
 
         var nodes = UiHelpers.SelectNodes(_config, "Change which nodes?");
@@ -248,6 +254,96 @@ public sealed class MinerScreen
 
         AnsiConsole.MarkupLine("[grey]Restart the miner for new pool settings to take effect.[/]");
         UiHelpers.Pause();
+    }
+
+    /// <summary>
+    /// Turns the power limit on or off per node, or pins a rung by hand.
+    ///
+    /// The thresholds themselves are edited in fleet.json rather than here. They are a ladder of
+    /// numbers that wants reading beside the node's own decision log, and a prompt that walks an
+    /// operator through five rungs one at a time would be a worse way to do it than an editor.
+    /// </summary>
+    private async Task ThrottleAsync(CancellationToken ct)
+    {
+        UiHelpers.Header("Power limit while the PC is in use");
+
+        AnsiConsole.MarkupLine(
+            "Holds the miner back while somebody is working on the machine, and lets it run flat");
+        AnsiConsole.MarkupLine(
+            "out when they leave. The rung is read against CPU used by everything except the miner.");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine(
+            "[grey]Coming down is immediate; going back up waits for the machine to stay quiet, so a[/]");
+        AnsiConsole.MarkupLine(
+            "[grey]single burst of activity does not rock the miner up and down.[/]");
+        AnsiConsole.MarkupLine(
+            "[grey]At 0% the miner is stopped outright rather than capped, because a capped miner[/]");
+        AnsiConsole.MarkupLine(
+            "[grey]still holds about 2.3 GB for its dataset - and on a 16 GB node that memory is[/]");
+        AnsiConsole.MarkupLine(
+            "[grey]what makes the machine feel slow.[/]");
+        AnsiConsole.WriteLine();
+
+        var current = _config.Throttle;
+        AnsiConsole.MarkupLine(
+            $"Rules in [blue]{UiHelpers.Escape(_config.Path)}[/]: floor [aqua]{current.FloorLevel ?? 0}%[/], " +
+            $"back up after [aqua]{current.RampUpSeconds ?? 120}s[/] of quiet.");
+        AnsiConsole.WriteLine();
+
+        var nodes = UiHelpers.SelectNodes(_config, "Change which nodes?");
+        if (nodes.Count == 0) return;
+
+        var choice = AnsiConsole.Prompt(new SelectionPrompt<string>()
+            .Title("Power limit should be")
+            .AddChoices("automatic", "off", "pinned by hand"));
+
+        int? pinned = null;
+        var clearManual = false;
+
+        switch (choice)
+        {
+            case "automatic":
+                foreach (var node in nodes) EnableThrottle(node, true);
+                clearManual = true;
+                break;
+
+            case "off":
+                foreach (var node in nodes) EnableThrottle(node, false);
+                clearManual = true;
+                break;
+
+            default:
+                pinned = AnsiConsole.Prompt(
+                    new TextPrompt<int>("Hold the miner at which percent?")
+                        .DefaultValue(50)
+                        .Validate(v => v is >= 0 and <= 100
+                            ? ValidationResult.Success()
+                            : ValidationResult.Error("[red]0 to 100[/]")));
+                foreach (var node in nodes) EnableThrottle(node, true);
+                break;
+        }
+
+        _config.Save();
+
+        var results = await AnsiConsole.Status().StartAsync("Pushing...", async _ =>
+            await _fleet.PushThrottleAsync(nodes, pinned, clearManual, ct));
+
+        foreach (var (node, result) in results.OrderBy(r => r.Node.Name, StringComparer.OrdinalIgnoreCase))
+            UiHelpers.Result(result.Ok, $"{node.Name}: {result.Message}");
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine("[grey]The Pwr column on the dashboard shows the rung each node is on.[/]");
+        UiHelpers.Pause();
+    }
+
+    /// <summary>
+    /// Records the choice against the node rather than the fleet, because it is a property of the
+    /// machine: one rig has somebody sitting at it and the next one does not.
+    /// </summary>
+    private static void EnableThrottle(NodeConfig node, bool enabled)
+    {
+        node.Throttle ??= new ThrottleConfig();
+        node.Throttle.Enabled = enabled;
     }
 
     private async Task LogsAsync(CancellationToken ct)

@@ -53,10 +53,10 @@ Hand-written source only; excludes `bin`/`obj`, generated files, and documentati
 
 | Language | Files | Code lines |
 |----------|------:|-----------:|
-| C# (agent + console + contracts) | 24 | 3,307 |
-| C# (tests) | 4 | 243 |
-| PowerShell (`deploy/`) | 4 | 325 |
-| **Total** | **32** | **3,875** |
+| C# (agent + console + contracts) | 34 | 4,848 |
+| C# (tests) | 6 | 383 |
+| PowerShell (`deploy/`) | 4 | 332 |
+| **Total** | **44** | **5,563** |
 
 ---
 
@@ -153,6 +153,11 @@ hardware.
 | `AgentUpdateService` | Update the agent itself from an xmrig-fleet release and restart into it |
 | `PerformanceCounterPump` | Polls Windows' performance counters. Tried as a fix for the hashrate gap below and did **not** work; kept only because it is harmless and rules the idea out |
 | `SessionMonitorService` | Keeps one hidden Task Manager in the node's logged-on session, launching it with `CreateProcessAsUser` and adopting one already open rather than starting a second |
+| `ThrottleService` | Holds the miner back while somebody is using the machine: reads the ladder every second, caps or stops the miner, records every decision |
+| `ThrottleLadder` | The rung rule itself — pure, clock-injected, and the part the tests drive |
+| `MinerCpuLimit` | The CPU cap, a named job object so an agent restart can still lift its own limit |
+| `SystemLoadReader` | `GetSystemTimes` + `GlobalMemoryStatusEx`, with the miner's own CPU time subtracted |
+| `ThrottleLog` | `throttle.log` beside the binary: every rung change with the readings behind it |
 | `MinerConfigStore` | Durable per-node miner settings |
 
 ### 2. **XmrigFleet.Console**
@@ -194,6 +199,7 @@ chasing coverage.
 | File | Guards |
 |------|--------|
 | `AgentUpdateTests` | The agent picks its own release asset and never the console's, the two never want the same file, the node's token files are excluded from the swap, and a `v1.4.0` tag is recognised as the `1.4.0.0` build already running |
+| `ThrottleTests` | Coming down is immediate and going up waits; a burst restarts the wait; the floor holds; a ladder typed out of order still reads correctly; switching the limit on does not discard the tuned ladder; per-node overrides replace only what they name |
 | `MarkupSafetyTests` | Prompts and badges render data holding `[` — the crash that reached the operator twice. Drives real prompts through `Spectre.Console.Testing`, and asserts escaping never reaches the stored value |
 | `EconomicsTests` | Per-node tariffs summed separately, the income formula, idle nodes not charged, measured power beating the configured fallback |
 | `UpdateAssetTests` | `update` matches the console asset and never the agent one that sits beside it in the same release |
@@ -219,6 +225,8 @@ All routes live under `/api/v1` and require the `X-Fleet-Token` header.
 | `GET` / `PUT` | `/config` | Read or patch the stored miner config |
 | `POST` | `/install` | Install or update XMRig into a target directory |
 | `GET` | `/logs` | Last 200 captured output lines |
+| `GET` | `/throttle` | Current power rung, the reason for it, and the load behind it |
+| `GET` | `/throttle/log` | The node's own record of every rung change and its readings |
 | `POST` | `/agent/update` | Update the agent itself and restart into the new build |
 
 ---
@@ -238,14 +246,32 @@ All routes live under `/api/v1` and require the `X-Fleet-Token` header.
     "url": "pool.hashvault.pro:443",
     "wallet": "4..."
   },
+  "throttle": {
+    "enabled": false,
+    "floorLevel": 0,
+    "rampUpSeconds": 120,
+    "steps": [
+      { "otherCpuPercent": 0,  "level": 100 },
+      { "otherCpuPercent": 10, "level": 75 },
+      { "otherCpuPercent": 25, "level": 50 },
+      { "otherCpuPercent": 45, "level": 25 },
+      { "otherCpuPercent": 70, "level": 0 }
+    ]
+  },
   "nodes": [
     { "name": "rig-1", "host": "100.100.10.11", "port": 47800,
       "enabled": true, "powerFallbackWatts": 220 },
     { "name": "rig-2", "host": "100.100.10.12", "port": 47800,
-      "enabled": true, "powerFallbackWatts": 310, "pricePerKwh": 7.2 }
+      "enabled": true, "powerFallbackWatts": 310, "pricePerKwh": 7.2,
+      "throttle": { "enabled": true, "floorLevel": 25 } }
   ]
 }
 ```
+
+The `throttle` block is fleet-wide; a node's own block overrides only the fields it names, and
+the console resolves the two before pushing the result to that node. The ladder is read against
+CPU used by **everything except the miner** — reading total load would make capping the miner
+lower the very figure the cap responds to, and the machine would oscillate instead of settling.
 
 ### Agent — `appsettings.json`
 
@@ -320,6 +346,7 @@ xmrig-fleet economics
 xmrig-fleet pool
 xmrig-fleet update [--check]    # --check reports and exits 1 without installing
 xmrig-fleet upgrade-agents [node ...] [--version=v1.5.0] [--force]
+xmrig-fleet throttle [node ...] [--sync|--set=N|--auto] [--log]
 xmrig-fleet version
 ```
 
@@ -415,6 +442,19 @@ xmrig-fleet/
       throughput far more than the CPU model does, and were previously invisible
 
 ### Implemented, Not Yet Verified Live ⏳
+- [ ] **Adaptive power limit.** Five rungs (100/75/50/25/0) chosen from the CPU load of everything
+      except the miner. 25-100% is a hard cap on a named job object, applied instantly and leaving
+      the RandomX dataset and huge pages untouched; 0% stops the miner outright, because a capped
+      miner still holds ~2.3 GB and on a 16 GB node that memory is what makes the machine feel
+      slow. Coming down is immediate, going up waits for `rampUpSeconds` of quiet. Rules live in
+      `fleet.json` with per-node overrides; every rung change is recorded on the node with the
+      readings behind it, because the shipped thresholds are a guess meant to be corrected from
+      that log. Unit-tested, built, but not yet run against a live node
+- [ ] Session-side signals for the same feature: user input idle, the foreground window and the
+      running program list, none of which a service in session 0 can see. Planned as a helper
+      launched into the interactive session by the machinery that already places Task Manager
+      there — which would also settle whether polling counters from *that* session is what the
+      Task Manager workaround has really been doing all along
 - [ ] `upgrade-agents`: console-driven agent self-update. Written and unit-tested, but no node
       has yet been rolled over with it — the one node that needed it was locked out by a token
       mismatch at the time, which is exactly the case the command refuses to touch
@@ -495,8 +535,8 @@ xmrig-fleet/
 ## Document Information
 
 **Document Version**: v1.1
-**Last Updated**: 2026-08-30
-**Product Version**: 1.1.2
+**Last Updated**: 2026-09-01
+**Product Version**: 1.8.4
 **Status**: Active
 **Repository**: `c:\Repos\xmrig-fleet` (branch `master`), published at
 [github.com/XYphrodite/xmrig-fleet](https://github.com/XYphrodite/xmrig-fleet)

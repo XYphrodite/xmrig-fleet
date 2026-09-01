@@ -39,10 +39,14 @@ builder.Services.AddSingleton<HardwareService>();
 builder.Services.AddSingleton<InstallerService>();
 builder.Services.AddSingleton<AgentUpdateService>();
 builder.Services.AddSingleton<SessionMonitorService>();
+builder.Services.AddSingleton<MinerCpuLimit>();
+builder.Services.AddSingleton(new ThrottleLog(basePath));
+builder.Services.AddSingleton<ThrottleService>();
 // Same instance both ways: the config endpoint calls Apply for an immediate response, the
 // background loop keeps the window alive and covers a logon that happens later.
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionMonitorService>());
 builder.Services.AddHostedService<PerformanceCounterPump>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ThrottleService>());
 builder.Services.AddHttpClient("github", client =>
 {
     // The GitHub API rejects requests without a User-Agent.
@@ -97,13 +101,13 @@ var api = app.MapGroup("/api/v1");
 
 api.MapGet("/info", () => Info());
 
-api.MapGet("/status", async (MinerService miner, HardwareService hw, CancellationToken ct) =>
+api.MapGet("/status", async (MinerService miner, HardwareService hw, ThrottleService throttle, CancellationToken ct) =>
 {
     // Sensors and the miner API are independent, so read them together.
     var minerTask = miner.GetStatusAsync(ct);
     var hardwareTask = hw.ReadAsync(ct);
     await Task.WhenAll(minerTask, hardwareTask);
-    return new NodeSnapshotDto(Info(), minerTask.Result, hardwareTask.Result);
+    return new NodeSnapshotDto(Info(), minerTask.Result, hardwareTask.Result) { Throttle = throttle.Status() };
 });
 
 api.MapGet("/miner", (MinerService miner, CancellationToken ct) => miner.GetStatusAsync(ct));
@@ -129,6 +133,13 @@ api.MapPost("/install", (InstallRequestDto request, InstallerService installer, 
     installer.InstallAsync(request, ct));
 
 api.MapGet("/logs", (MinerService miner) => new LogTailDto("xmrig", miner.RecentOutput));
+
+api.MapGet("/throttle", (ThrottleService throttle) => throttle.Status());
+
+// The decisions this node made and the readings behind them. The shipped thresholds are a guess,
+// and this is what they are meant to be corrected from.
+api.MapGet("/throttle/log", (ThrottleLog decisions, int? lines) =>
+    new LogTailDto("throttle", decisions.Tail(lines ?? 100)));
 
 // Updates the agent itself and restarts into the new binary. The miner is a separate process
 // and keeps hashing; the node's token files are deliberately left untouched.

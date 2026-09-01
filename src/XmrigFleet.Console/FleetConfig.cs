@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using XmrigFleet.Contracts;
 
 namespace XmrigFleet.Console;
 
@@ -28,6 +29,9 @@ public sealed class FleetConfig
     public string PriceApiUrl { get; set; } = "https://api.coingecko.com/api/v3/simple/price?ids=monero&vs_currencies={currency}";
 
     public UpdateConfig Update { get; set; } = new();
+
+    /// <summary>Fleet-wide throttle rules. Individual nodes override parts of this.</summary>
+    public ThrottleConfig Throttle { get; set; } = new();
 
     public List<NodeConfig> Nodes { get; set; } = [];
 
@@ -94,6 +98,54 @@ public sealed class FleetConfig
 
     /// <summary>The tariff that actually applies to a node: its own, else the fleet default.</summary>
     public double PricePerKwhFor(NodeConfig node) => node.PricePerKwh ?? Electricity.PricePerKwh;
+
+    /// <summary>
+    /// The throttle rules a node should actually run: the fleet's, with that node's exceptions
+    /// laid over them.
+    ///
+    /// Resolved here rather than on the node so the machines cannot drift apart. A rig only ever
+    /// receives a finished answer, and the file on the operator's machine stays the single place
+    /// the rules are read from and edited.
+    /// </summary>
+    public ThrottleSettingsDto ThrottleFor(NodeConfig node)
+    {
+        var own = node.Throttle;
+
+        return new ThrottleSettingsDto
+        {
+            Enabled = own?.Enabled ?? Throttle.Enabled,
+            Steps = (own?.Steps ?? Throttle.Steps) is { Count: > 0 } steps
+                ? steps.Select(s => new ThrottleStepDto(s.OtherCpuPercent, s.Level)).ToList()
+                : ThrottleSettingsDto.DefaultSteps,
+            FloorLevel = own?.FloorLevel ?? Throttle.FloorLevel,
+            RampUpSeconds = own?.RampUpSeconds ?? Throttle.RampUpSeconds,
+        };
+    }
+}
+
+/// <summary>
+/// How hard a miner may run while somebody is using its machine. Every field is nullable at node
+/// level so an exception can name one setting without restating the rest.
+/// </summary>
+public sealed class ThrottleConfig
+{
+    /// <summary>Off unless asked for: throttling a rig nobody sits at only loses money.</summary>
+    public bool? Enabled { get; set; }
+
+    /// <summary>The ladder, read against CPU used by everything except the miner.</summary>
+    public List<ThrottleStepConfig>? Steps { get; set; }
+
+    /// <summary>Never go below this level. 0 lets the miner stop and hand its memory back.</summary>
+    public int? FloorLevel { get; set; }
+
+    /// <summary>Seconds of quiet before climbing a rung. Coming down is always immediate.</summary>
+    public int? RampUpSeconds { get; set; }
+}
+
+public sealed class ThrottleStepConfig
+{
+    public double OtherCpuPercent { get; set; }
+    public int Level { get; set; }
 }
 
 public sealed class NodeConfig
@@ -124,6 +176,13 @@ public sealed class NodeConfig
     /// totals across nodes are only meaningful in one currency.
     /// </summary>
     public double? PricePerKwh { get; set; }
+
+    /// <summary>
+    /// This machine's exceptions to the fleet throttle rules. Only the fields that differ need
+    /// setting; the rest come from <see cref="FleetConfig.Throttle"/>. A gaming rig and a
+    /// headless one want different answers, and the Xeon's 16 GB wants a different one again.
+    /// </summary>
+    public ThrottleConfig? Throttle { get; set; }
 
     public string Endpoint => $"http://{Host}:{Port}";
 

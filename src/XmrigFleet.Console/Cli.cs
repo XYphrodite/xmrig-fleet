@@ -22,10 +22,18 @@ public static class Cli
           pool           pool and wallet balance
           update         download and install a newer xmrig-fleet
           upgrade-agents update the agent on the nodes themselves
+          throttle       show, push or pin the mining power limit
           version        print the running version
           help           this text
 
         Commands that take nodes act on every enabled node when none are named.
+
+        throttle [node ...] [--set=N | --auto | --sync] [--log]
+          no options   report the rung each node is on and why
+          --sync       push the rules from fleet.json, keeping the automation in charge
+          --set=N      pin N percent (0-100) and stand the automation down
+          --auto       hand control back to the automation
+          --log        print the node's own record of its decisions
         """;
 
     public static async Task<int> RunAsync(string[] args, FleetConfig config, FleetService fleet, MarketService market, CancellationToken ct)
@@ -60,6 +68,9 @@ public static class Cli
 
             case "upgrade-agents" or "upgrade-agent":
                 return await UpgradeAgentsAsync(config, fleet, names, ct);
+
+            case "throttle":
+                return await ThrottleAsync(config, fleet, names, ct);
 
             case "version" or "--version" or "v":
                 AnsiConsole.WriteLine($"xmrig-fleet {UpdateService.CurrentVersion}");
@@ -229,6 +240,128 @@ public static class Cli
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Reports, pushes or pins the mining power limit.
+    ///
+    /// Reporting is the default because that is what an operator wants when a node's hashrate
+    /// looks wrong: the rung and the reason answer "is it throttled, or is it broken" in one line,
+    /// and those two have very different remedies.
+    /// </summary>
+    private static async Task<int> ThrottleAsync(FleetConfig config, FleetService fleet, string[] args, CancellationToken ct)
+    {
+        var names = args.Where(a => !a.StartsWith('-')).ToArray();
+        var wantLog = args.Contains("--log");
+        var auto = args.Contains("--auto");
+        var sync = args.Contains("--sync");
+
+        int? pinned = null;
+        if (args.FirstOrDefault(a => a.StartsWith("--set=", StringComparison.OrdinalIgnoreCase)) is { } setArg)
+        {
+            if (!int.TryParse(setArg[6..], out var level) || level is < 0 or > 100)
+            {
+                AnsiConsole.MarkupLine("[red]--set needs a whole number from 0 to 100.[/]");
+                return 2;
+            }
+            pinned = level;
+        }
+
+        if (pinned is not null && auto)
+        {
+            AnsiConsole.MarkupLine("[red]--set and --auto ask for opposite things.[/]");
+            return 2;
+        }
+
+        var targets = names.Length == 0
+            ? fleet.EnabledNodes
+            : names.Select(config.FindNode).OfType<NodeConfig>().ToList();
+
+        var missing = names.Where(n => config.FindNode(n) is null).ToList();
+        foreach (var name in missing)
+            AnsiConsole.MarkupLine($"[red]No node named '{Markup.Escape(name)}'.[/]");
+
+        if (targets.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]Nothing to do.[/]");
+            return 1;
+        }
+
+        if (pinned is not null || auto || sync)
+        {
+            var results = await fleet.PushThrottleAsync(targets, pinned, auto, ct);
+            foreach (var (node, result) in results.OrderBy(r => r.Node.Name, StringComparer.OrdinalIgnoreCase))
+                UiHelpers.Result(result.Ok, $"{node.Name}: {result.Message}");
+
+            if (!results.All(r => r.Result.Ok)) return 1;
+        }
+
+        if (wantLog) return await ThrottleLogAsync(fleet, targets, ct);
+
+        var states = await fleet.PollAsync(ct);
+        var table = new Table().Border(TableBorder.Rounded)
+            .AddColumn("Node")
+            .AddColumn(new TableColumn("Power").RightAligned())
+            .AddColumn(new TableColumn("Other CPU").RightAligned())
+            .AddColumn(new TableColumn("Hashrate").RightAligned())
+            .AddColumn("Reason");
+
+        foreach (var state in states.Where(s => targets.Any(t => t.Name == s.Node.Name))
+                                    .OrderBy(s => s.Node.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            var throttle = state.Throttle;
+            table.AddRow(
+                new Markup($"[bold]{UiHelpers.Escape(state.Node.Name)}[/]"),
+                new Markup(UiHelpers.ThrottleBadge(throttle)),
+                new Markup(throttle?.OtherCpuPercent is { } cpu ? $"{cpu:0.#}%" : "[grey]-[/]"),
+                new Markup(state.Hashrate > 0 ? $"[aqua]{Economics.FormatHashrate(state.Hashrate)}[/]" : "[grey]-[/]"),
+                new Markup(throttle is null
+                    ? "[grey]agent predates throttling; run upgrade-agents[/]"
+                    : UiHelpers.Escape(throttle.Reason)));
+        }
+
+        AnsiConsole.Write(table);
+        return missing.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>Prints each node's decision log, which is where the thresholds get corrected from.</summary>
+    private static async Task<int> ThrottleLogAsync(FleetService fleet, IReadOnlyList<NodeConfig> targets, CancellationToken ct)
+    {
+        var ok = true;
+
+        foreach (var node in targets.OrderBy(n => n.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            using var client = fleet.CreateClient(node, TimeSpan.FromSeconds(30));
+            AnsiConsole.MarkupLine($"[bold]{UiHelpers.Escape(node.Name)}[/]");
+
+            try
+            {
+                var log = await client.GetThrottleLogAsync(200, ct);
+                if (log is null)
+                {
+                    AnsiConsole.MarkupLine("  [grey]agent predates throttling; run upgrade-agents[/]");
+                    ok = false;
+                }
+                else if (log.Lines.Count == 0)
+                {
+                    AnsiConsole.MarkupLine("  [grey]no decisions recorded yet[/]");
+                }
+                else
+                {
+                    foreach (var line in log.Lines)
+                        AnsiConsole.MarkupLine($"  {UiHelpers.Escape(line)}");
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+            {
+                AnsiConsole.MarkupLine($"  [red]{UiHelpers.Escape(ex.Message)}[/]");
+                ok = false;
+            }
+
+            AnsiConsole.WriteLine();
+        }
+
+        return ok ? 0 : 1;
     }
 
     private static async Task<int> ControlAsync(

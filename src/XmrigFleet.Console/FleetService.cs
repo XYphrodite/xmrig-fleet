@@ -21,6 +21,9 @@ public sealed record NodeState(NodeConfig Node, NodeSnapshotDto? Snapshot, strin
             : Node.PowerFallbackWatts ?? Snapshot?.Hardware.EstimatedPowerWatts ?? 0;
 
     public bool PowerIsMeasured => Snapshot?.Hardware.PowerIsMeasured == true;
+
+    /// <summary>Null on an agent too old to throttle, which is why the column can be blank.</summary>
+    public ThrottleStatusDto? Throttle => Snapshot?.Throttle;
 }
 
 /// <summary>Fans requests out to every enabled node and keeps the latest answer for each.</summary>
@@ -59,9 +62,19 @@ public sealed class FleetService
     }
 
     /// <summary>Runs one action against every enabled node in parallel and reports each result.</summary>
-    public async Task<IReadOnlyList<(NodeConfig Node, CommandResultDto Result)>> ForEachAsync(
+    public Task<IReadOnlyList<(NodeConfig Node, CommandResultDto Result)>> ForEachAsync(
         IEnumerable<NodeConfig> nodes,
         Func<AgentClient, CancellationToken, Task<CommandResultDto?>> action,
+        CancellationToken ct) =>
+        ForEachAsync(nodes, (_, client, token) => action(client, token), ct);
+
+    /// <summary>
+    /// The same, for actions that need to know which node they are talking to - pushing throttle
+    /// rules, say, where every node gets an answer resolved from its own overrides.
+    /// </summary>
+    public async Task<IReadOnlyList<(NodeConfig Node, CommandResultDto Result)>> ForEachAsync(
+        IEnumerable<NodeConfig> nodes,
+        Func<NodeConfig, AgentClient, CancellationToken, Task<CommandResultDto?>> action,
         CancellationToken ct)
     {
         var tasks = nodes.Select(async node =>
@@ -69,7 +82,7 @@ public sealed class FleetService
             using var client = CreateClient(node, TimeSpan.FromSeconds(30));
             try
             {
-                var result = await action(client, ct) ?? CommandResultDto.Failure("empty response");
+                var result = await action(node, client, ct) ?? CommandResultDto.Failure("empty response");
                 return (node, result);
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
@@ -79,6 +92,46 @@ public sealed class FleetService
         });
 
         return await Task.WhenAll(tasks);
+    }
+
+    /// <summary>
+    /// Sends each node the throttle rules resolved for it, optionally pinning a level by hand.
+    ///
+    /// A pinned level switches the automation off on that node until it is cleared, which is what
+    /// makes a measurement possible: an A/B that the automation can move underneath it measures
+    /// nothing.
+    /// </summary>
+    public Task<IReadOnlyList<(NodeConfig Node, CommandResultDto Result)>> PushThrottleAsync(
+        IEnumerable<NodeConfig> nodes,
+        int? manualLevel,
+        bool clearManual,
+        CancellationToken ct) =>
+        ForEachAsync(nodes, async (node, client, token) =>
+        {
+            var settings = _config.ThrottleFor(node) with
+            {
+                ManualLevel = manualLevel,
+                ClearManualLevel = clearManual ? true : null,
+            };
+
+            var saved = await client.PutConfigAsync(new MinerConfigDto { Throttle = settings }, token);
+            if (saved is null) return CommandResultDto.Failure("empty response");
+
+            var applied = saved.Throttle;
+            if (applied is null)
+                return CommandResultDto.Failure("this agent is too old to throttle; run upgrade-agents");
+
+            return CommandResultDto.Success(Describe(applied));
+        }, ct);
+
+    private static string Describe(ThrottleSettingsDto settings)
+    {
+        if (settings.Enabled != true) return "throttling off";
+        if (settings.ManualLevel is { } pinned) return $"pinned at {pinned}%, automation off";
+
+        var floor = settings.FloorLevel ?? 0;
+        var ramp = settings.RampUpSeconds ?? 120;
+        return $"throttling on, floor {floor}%, back up after {ramp}s of quiet";
     }
 
     private static string Describe(Exception ex) => ex switch

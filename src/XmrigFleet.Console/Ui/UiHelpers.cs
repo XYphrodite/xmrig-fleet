@@ -67,6 +67,22 @@ public static class UiHelpers
         return miner.MsrMod is { } msr ? $"[green]{Escape(msr)}[/]" : "[red]no[/]";
     }
 
+    /// <summary>
+    /// The throttle rung, which is the first thing to check when a node's hashrate looks wrong.
+    ///
+    /// A blank cell means the agent predates the feature rather than that nothing is happening -
+    /// hence a dash for "off" and a dimmed one for "cannot say", which are different answers.
+    /// </summary>
+    public static string ThrottleBadge(XmrigFleet.Contracts.ThrottleStatusDto? throttle)
+    {
+        if (throttle is null) return "[grey]?[/]";
+        if (!throttle.Enabled) return "[grey]-[/]";
+
+        var colour = throttle.Level switch { >= 100 => "green", >= 50 => "yellow", > 0 => "darkorange", _ => "red" };
+        var pin = throttle.Manual ? "*" : "";
+        return $"[{colour}]{throttle.Level}%{pin}[/]";
+    }
+
     public static string Money(double? amount, string currency) =>
         amount is null ? "[grey]-[/]" : $"{amount.Value:N2} {Escape(currency)}";
 

@@ -41,6 +41,19 @@ public sealed class AgentClient : IDisposable
     public Task<LogTailDto?> GetLogsAsync(CancellationToken ct) =>
         _http.GetFromJsonAsync<LogTailDto>("logs", JsonOptions, ct);
 
+    /// <summary>
+    /// The node's own record of every rung it moved to and the readings behind it. Returns null
+    /// on an agent that predates throttling, which the caller reports rather than treats as an
+    /// error - a mixed-version fleet is normal while a roll-out is in progress.
+    /// </summary>
+    public async Task<LogTailDto?> GetThrottleLogAsync(int lines, CancellationToken ct)
+    {
+        using var response = await _http.GetAsync($"throttle/log?lines={lines}", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<LogTailDto>(JsonOptions, ct);
+    }
+
     public Task<CommandResultDto?> StartAsync(CancellationToken ct) => PostAsync("miner/start", ct);
     public Task<CommandResultDto?> StopAsync(CancellationToken ct) => PostAsync("miner/stop", ct);
     public Task<CommandResultDto?> RestartAsync(CancellationToken ct) => PostAsync("miner/restart", ct);

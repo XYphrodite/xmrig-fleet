@@ -57,6 +57,19 @@ public sealed class MinerService : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// The running miner's pid, or null. Cheap on purpose: the throttle asks once a second and
+    /// must not pay for an HTTP round trip to the miner's API to find out the process exists.
+    /// </summary>
+    public int? RunningPid()
+    {
+        try { return FindRunning()?.Id; }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            return null;
+        }
+    }
+
     public async Task<CommandResultDto> StartAsync(CancellationToken ct)
     {
         await _gate.WaitAsync(ct);

@@ -83,7 +83,11 @@ public sealed record HardwareDto
     public string? SensorNotice { get; init; }
 }
 
-public sealed record NodeSnapshotDto(AgentInfoDto Agent, MinerStatusDto Miner, HardwareDto Hardware);
+public sealed record NodeSnapshotDto(AgentInfoDto Agent, MinerStatusDto Miner, HardwareDto Hardware)
+{
+    /// <summary>Null on an agent too old to throttle, which is how the console tells them apart.</summary>
+    public ThrottleStatusDto? Throttle { get; init; }
+}
 
 public sealed record CommandResultDto(bool Ok, string Message)
 {
@@ -115,6 +119,97 @@ public sealed record MinerConfigDto
     /// Null leaves the node's current setting alone, which is what a pool-settings push sends.
     /// </summary>
     public bool? KeepMonitorOpen { get; init; }
+
+    /// <summary>
+    /// How hard the miner may run while the machine is in use. Null leaves the node alone.
+    /// </summary>
+    public ThrottleSettingsDto? Throttle { get; init; }
+
+    /// <summary>
+    /// True when the miner is stopped because the throttle took it to zero, rather than because
+    /// an operator stopped it.
+    ///
+    /// Persisted because the agent restarts often - every self-update does - and the distinction
+    /// cannot be recovered afterwards. Without it a node stopped by the throttle either stays
+    /// down forever, or the agent starts mining that nobody asked for. Neither is acceptable.
+    /// </summary>
+    public bool? MinerStoppedByThrottle { get; init; }
+}
+
+/// <summary>
+/// One rung of the throttle ladder: at or above <see cref="OtherCpuPercent"/> of CPU used by
+/// everything except the miner, the miner is held to <see cref="Level"/> percent.
+/// </summary>
+public sealed record ThrottleStepDto(double OtherCpuPercent, int Level);
+
+/// <summary>
+/// How hard the miner may run while somebody is using the machine.
+///
+/// The ladder is deliberately coarse. A continuous curve tracks every twitch of background
+/// activity and spends its life re-applying a limit nobody asked for; five rungs are enough to
+/// keep a machine responsive and are legible in the console and in the decision log.
+/// </summary>
+public sealed record ThrottleSettingsDto
+{
+    /// <summary>Off by default: a node only throttles once an operator asks it to.</summary>
+    public bool? Enabled { get; init; }
+
+    /// <summary>
+    /// The ladder, lowest threshold first. Null keeps the node's current ladder; the agent
+    /// falls back to <see cref="DefaultSteps"/> when it has never been given one.
+    /// </summary>
+    public IReadOnlyList<ThrottleStepDto>? Steps { get; init; }
+
+    /// <summary>Never drop below this level, whatever the ladder says. 0 allows a full stop.</summary>
+    public int? FloorLevel { get; init; }
+
+    /// <summary>
+    /// Seconds of quiet before the miner is allowed back up a rung. Coming down is immediate.
+    ///
+    /// The asymmetry is the whole point: interrupting somebody costs more than two minutes of
+    /// hashing, and it also stops a single burst - opening a folder, a browser tab - from
+    /// rocking the miner up and down.
+    /// </summary>
+    public int? RampUpSeconds { get; init; }
+
+    /// <summary>
+    /// A level the operator pinned by hand, which switches the automation off until cleared.
+    /// Use <see cref="ClearManualLevel"/> to hand control back; null here means "leave as is".
+    /// </summary>
+    public int? ManualLevel { get; init; }
+
+    /// <summary>Hands control back to the automation, clearing <see cref="ManualLevel"/>.</summary>
+    public bool? ClearManualLevel { get; init; }
+
+    /// <summary>
+    /// Where the ladder starts before anybody tunes it. These thresholds are a guess and are
+    /// meant to be corrected from the node's own decision log, not defended.
+    /// </summary>
+    public static IReadOnlyList<ThrottleStepDto> DefaultSteps =>
+    [
+        new(0, 100),
+        new(10, 75),
+        new(25, 50),
+        new(45, 25),
+        new(70, 0),
+    ];
+}
+
+/// <summary>What the throttle is doing right now and why, so a slow node is never a mystery.</summary>
+public sealed record ThrottleStatusDto
+{
+    public bool Enabled { get; init; }
+    /// <summary>0-100. Below 100 the miner is capped; at 0 it is stopped and its memory released.</summary>
+    public int Level { get; init; }
+    /// <summary>Plain-language cause, e.g. "other processes at 52% CPU". Shown in the console.</summary>
+    public string Reason { get; init; } = "";
+    /// <summary>True when an operator pinned the level and the automation is standing down.</summary>
+    public bool Manual { get; init; }
+    /// <summary>CPU used by everything except the miner, which is what the ladder is read against.</summary>
+    public double? OtherCpuPercent { get; init; }
+    public double? MemoryUsedPercent { get; init; }
+    /// <summary>Seconds the miner has been held at <see cref="Level"/>.</summary>
+    public double SecondsAtLevel { get; init; }
 }
 
 /// <summary>Install or update xmrig. Either give an explicit <see cref="DownloadUrl"/> or a GitHub release tag.</summary>

@@ -83,6 +83,7 @@ public sealed class Dashboard
             .AddColumn("State")
             .AddColumn(new TableColumn("Hashrate").RightAligned())
             .AddColumn(new TableColumn("Thr").RightAligned())
+            .AddColumn(new TableColumn("Pwr").RightAligned())
             .AddColumn(new TableColumn("Pages").RightAligned())
             .AddColumn(new TableColumn("MSR").RightAligned())
             .AddColumn(new TableColumn("CPU").RightAligned())
@@ -101,6 +102,7 @@ public sealed class Dashboard
                 new Markup(UiHelpers.StatusBadge(state)),
                 new Markup(state.Hashrate > 0 ? $"[aqua]{Economics.FormatHashrate(state.Hashrate)}[/]" : "[grey]-[/]"),
                 new Markup(miner?.MiningThreads is { } thr ? $"{thr}" : "[grey]-[/]"),
+                new Markup(UiHelpers.ThrottleBadge(state.Throttle)),
                 new Markup(UiHelpers.HugePages(miner)),
                 new Markup(UiHelpers.MsrBadge(miner)),
                 new Markup(hardware?.CpuLoadPercent is { } load ? $"{load:0}%" : "[grey]-[/]"),

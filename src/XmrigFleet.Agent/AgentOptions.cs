@@ -105,10 +105,35 @@ public sealed class MinerConfigStore
                 ExtraArgs = patch.ExtraArgs ?? _current.ExtraArgs,
                 PowerFallbackWatts = patch.PowerFallbackWatts ?? _current.PowerFallbackWatts,
                 KeepMonitorOpen = patch.KeepMonitorOpen ?? _current.KeepMonitorOpen,
+                Throttle = MergeThrottle(_current.Throttle, patch.Throttle),
+                MinerStoppedByThrottle = patch.MinerStoppedByThrottle ?? _current.MinerStoppedByThrottle,
             };
             Save(_current);
             return _current;
         }
+    }
+
+    /// <summary>
+    /// Folds a throttle patch into what the node already has, field by field.
+    ///
+    /// Whole-object replacement would be wrong here: the console pushes <c>{ enabled: true }</c>
+    /// when an operator flips the switch and would silently take the tuned ladder with it. The one
+    /// field that clears rather than merges is the pinned level, and it needs its own flag to say
+    /// so - null already means "leave alone" everywhere else in this contract.
+    /// </summary>
+    private static ThrottleSettingsDto? MergeThrottle(ThrottleSettingsDto? current, ThrottleSettingsDto? patch)
+    {
+        if (patch is null) return current;
+        if (current is null) return patch with { ClearManualLevel = null };
+
+        return new ThrottleSettingsDto
+        {
+            Enabled = patch.Enabled ?? current.Enabled,
+            Steps = patch.Steps is { Count: > 0 } ? patch.Steps : current.Steps,
+            FloorLevel = patch.FloorLevel ?? current.FloorLevel,
+            RampUpSeconds = patch.RampUpSeconds ?? current.RampUpSeconds,
+            ManualLevel = patch.ClearManualLevel == true ? null : patch.ManualLevel ?? current.ManualLevel,
+        };
     }
 
     private MinerConfigDto Load()
