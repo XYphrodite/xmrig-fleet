@@ -34,6 +34,9 @@ builder.Services.AddSingleton<HardwareService>();
 builder.Services.AddSingleton<InstallerService>();
 builder.Services.AddSingleton<AgentUpdateService>();
 builder.Services.AddSingleton<SessionMonitorService>();
+// Same instance both ways: the config endpoint calls Apply for an immediate response, the
+// background loop keeps the window alive and covers a logon that happens later.
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionMonitorService>());
 builder.Services.AddHostedService<PerformanceCounterPump>();
 builder.Services.AddHttpClient("github", client =>
 {
