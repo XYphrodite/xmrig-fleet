@@ -449,6 +449,10 @@ xmrig-fleet/
       `resmon.exe` is a stub that starts `perfmon.exe`. Measured on `desktop-ib88isg`: the agent
       launched pid 26852 and the live window was pid 30052, its child. Verified after the fix by
       killing the window and watching one launch line name the pid that was still standing
+- [x] `NodeSnapshotDto.MonitorNotice` read back from both live nodes — `mks68i7rtx` answered
+      "adopted the Task Manager already open in session 2 as pid 13848" and `desktop-ib88isg`
+      "Task Manager already running as pid 27228". Before this the console printed "session
+      monitor on" whatever the node had done
 
 ### Implemented, Not Yet Verified Live ⏳
 - [ ] **Adaptive power limit.** Five rungs (100/75/50/25/0) chosen from the CPU load of everything
@@ -536,14 +540,17 @@ xmrig-fleet/
   a node whose Task Manager will not run — the two were measured at 7,092 and 7,097 H/s, so the
   choice costs nothing. It is a remedy without a diagnosis and both the code and the console
   say so.
-- **One node showed `taskmgr.exe` failing to load with a missing `ImageList_CoCreateInstance`
-  entry point, and the cause was never found.** `desktop-ib88isg`, during a spell when the agent
-  was relaunching Task Manager every thirty seconds, put a loader error dialog on the operator's
-  desktop at that same cadence. Nothing on the node explains it: the WinSxS Common-Controls v6
-  assemblies are present, there are no `SideBySide` events, no `comctl32.dll` shadows the real
-  one on `PATH`, `AppInit_DLLs` is empty, and Task Manager starts normally by hand and from a
-  remote shell. The Resource Monitor fallback exists so such a node still gets its window; it is
-  not a fix for whatever this was.
+- **`mks68i7rtx` showed `taskmgr.exe` failing to load with a missing `ImageList_CoCreateInstance`
+  entry point, and the cause is still unknown.** The loader dialog reached the operator during a
+  spell when the agent was relaunching Task Manager every thirty seconds, so it appeared at that
+  same cadence. The relaunch loop is fixed; the load failure is not explained. Everything ruled
+  out so far was ruled out on `desktop-ib88isg`, which turned out to be the wrong machine — its
+  WinSxS Common-Controls v6 assemblies are present, it logs no `SideBySide` events, no
+  `comctl32.dll` shadows the real one on `PATH`, and `AppInit_DLLs` is empty — so none of it
+  counts as evidence about `mks68i7rtx`, which has no SSH server and cannot be inspected the
+  same way. Reproducing it means closing the window that node currently has open, which costs
+  its hashrate while the attempt runs. The Resource Monitor fallback exists so a node in this
+  state still gets a window; it is not a fix for whatever this is.
 - **A node that loses its huge pages runs several times slower with no other symptom.**
   Measured on the Xeon E5-2680 v4: 5.97 kH/s at 100% allocation against 1.34 kH/s at 11%,
   a 4.5x swing from memory fragmentation alone. The `Pages` column now exposes it; the
@@ -572,7 +579,7 @@ xmrig-fleet/
 
 **Document Version**: v1.1
 **Last Updated**: 2026-09-01
-**Product Version**: 1.9.3
+**Product Version**: 1.9.4
 **Status**: Active
 **Repository**: `c:\Repos\xmrig-fleet` (branch `master`), published at
 [github.com/XYphrodite/xmrig-fleet](https://github.com/XYphrodite/xmrig-fleet)
