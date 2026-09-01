@@ -45,20 +45,35 @@ public sealed class SessionMonitorService : BackgroundService
         _log = log;
     }
 
+    /// <summary>
+    /// What the monitor last did, carried to the console in <see cref="NodeSnapshotDto.MonitorNotice"/>.
+    ///
+    /// Every caller used to throw this sentence away - the agent discarded what <see cref="Apply"/>
+    /// returned and the console printed "session monitor on" regardless - so a node whose window
+    /// would not open looked identical to one where it had. That is how mks68i7rtx ran with the
+    /// setting on, no window, and 60% of its hashrate, with nothing anywhere saying so.
+    /// </summary>
+    public string Notice { get; private set; } = "Session monitor has not run yet.";
+
     /// <summary>Acts on a freshly pushed setting. Returns what happened, for the console to show.</summary>
     public string Apply(bool enabled)
     {
         if (!OperatingSystem.IsWindows())
-            return "Session monitor is a Windows workaround; nothing to do on this platform.";
+            return Notice = "Session monitor is a Windows workaround; nothing to do on this platform.";
 
         if (!enabled)
         {
             StopMonitor();
-            return "Session monitor off.";
+            return Notice;
         }
 
-        return EnsureRunning(out var detail) ? $"Session monitor on: {detail}" : $"Session monitor could not start: {detail}";
+        return EnsureRunningNotice();
     }
+
+    private string EnsureRunningNotice()
+        => Notice = EnsureRunning(out var detail)
+            ? $"Session monitor on: {detail}"
+            : $"Session monitor could not start: {detail}";
 
     /// <summary>
     /// Re-launches the window if it was closed, and stops it when the setting is turned off.
@@ -73,7 +88,7 @@ public sealed class SessionMonitorService : BackgroundService
         {
             try
             {
-                if (_config.Current.KeepMonitorOpen == true) EnsureRunning(out _);
+                if (_config.Current.KeepMonitorOpen == true) EnsureRunningNotice();
                 else StopMonitor();
             }
             catch (Exception ex)
@@ -120,6 +135,7 @@ public sealed class SessionMonitorService : BackgroundService
     {
         lock (_gate)
         {
+            Notice = "Session monitor off.";
             if (_startedPid == 0) return;
 
             try

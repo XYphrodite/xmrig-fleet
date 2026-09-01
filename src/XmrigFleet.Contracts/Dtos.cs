@@ -87,6 +87,14 @@ public sealed record NodeSnapshotDto(AgentInfoDto Agent, MinerStatusDto Miner, H
 {
     /// <summary>Null on an agent too old to throttle, which is how the console tells them apart.</summary>
     public ThrottleStatusDto? Throttle { get; init; }
+
+    /// <summary>
+    /// What the session monitor last did, in the operator's terms — which window is open, or why
+    /// none is. Present for the same reason as <see cref="HardwareDto.SensorNotice"/>: the console
+    /// used to report "session monitor on" whatever had actually happened on the node, so a rig
+    /// could sit at 60% of its hashrate with the setting reading on and nothing to say otherwise.
+    /// </summary>
+    public string? MonitorNotice { get; init; }
 }
 
 public sealed record CommandResultDto(bool Ok, string Message)

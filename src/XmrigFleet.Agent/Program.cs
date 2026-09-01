@@ -101,13 +101,17 @@ var api = app.MapGroup("/api/v1");
 
 api.MapGet("/info", () => Info());
 
-api.MapGet("/status", async (MinerService miner, HardwareService hw, ThrottleService throttle, CancellationToken ct) =>
+api.MapGet("/status", async (MinerService miner, HardwareService hw, ThrottleService throttle, SessionMonitorService monitor, CancellationToken ct) =>
 {
     // Sensors and the miner API are independent, so read them together.
     var minerTask = miner.GetStatusAsync(ct);
     var hardwareTask = hw.ReadAsync(ct);
     await Task.WhenAll(minerTask, hardwareTask);
-    return new NodeSnapshotDto(Info(), minerTask.Result, hardwareTask.Result) { Throttle = throttle.Status() };
+    return new NodeSnapshotDto(Info(), minerTask.Result, hardwareTask.Result)
+    {
+        Throttle = throttle.Status(),
+        MonitorNotice = monitor.Notice,
+    };
 });
 
 api.MapGet("/miner", (MinerService miner, CancellationToken ct) => miner.GetStatusAsync(ct));

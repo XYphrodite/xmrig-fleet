@@ -179,7 +179,16 @@ public sealed class MinerScreen
                 try
                 {
                     var pushed = await client.PutConfigAsync(new MinerConfigDto { KeepMonitorOpen = enable }, ct);
-                    lock (results) results.Add((node.Name, pushed is not null, enable ? "session monitor on" : "session monitor off"));
+
+                    // Read back what the node actually did rather than echoing the request. A push
+                    // that lands is not a window that opened: the monitor can fail to start, and
+                    // saying "session monitor on" over that is how a rig sat at 60% of its
+                    // hashrate for a fortnight with nothing to show for the setting.
+                    var snapshot = pushed is null ? null : await client.GetStatusAsync(ct);
+                    var message = snapshot?.MonitorNotice
+                        ?? (enable ? "session monitor on" : "session monitor off");
+
+                    lock (results) results.Add((node.Name, pushed is not null, message));
                 }
                 catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
                 {
