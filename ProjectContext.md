@@ -152,7 +152,7 @@ hardware.
 | `InstallerService` | Resolve the right GitHub release asset, download, unpack, repoint the config |
 | `AgentUpdateService` | Update the agent itself from an xmrig-fleet release and restart into it |
 | `PerformanceCounterPump` | Polls Windows' performance counters. Tried as a fix for the hashrate gap below and did **not** work; kept only because it is harmless and rules the idea out |
-| `SessionMonitorService` | Keeps one hidden Task Manager in the node's logged-on session, launching it with `CreateProcessAsUser` and adopting one already open rather than starting a second |
+| `SessionMonitorService` | Keeps one hidden monitor window in the node's logged-on session — Task Manager, or Resource Monitor if that will not run. Launches with `CreateProcessAsUser`, waits out the hand-over to the child process both of them exit into, and adopts one already open rather than starting a second |
 | `ThrottleService` | Holds the miner back while somebody is using the machine: reads the ladder every second, caps or stops the miner, records every decision |
 | `ThrottleLadder` | The rung rule itself — pure, clock-injected, and the part the tests drive |
 | `MinerCpuLimit` | The CPU cap, a named job object so an agent restart can still lift its own limit |
@@ -440,6 +440,15 @@ xmrig-fleet/
       the MSR mod, read from `/2/summary` and `/2/backends`. Verified on `re-7lqd67ahcm0r`:
       `1174/1174` pages, 6 threads on 12 MB L3, `msr=intel`. Huge pages decide RandomX
       throughput far more than the CPU model does, and were previously invisible
+- [x] `upgrade-agents` against a live node: `desktop-ib88isg` rolled 1.9.2.0 -> 1.9.3 (345 files
+      replaced), the agent restarted into the new build and the miner kept running throughout —
+      6.34 kH/s before, 6.26 kH/s after, huge pages at 100% across the restart
+- [x] The session monitor tracks the window that survives the launch, not the process
+      `CreateProcessAsUser` returns. Both monitors hand over to a child and exit within a
+      second — Task Manager restarts itself under the unfiltered administrator token, and
+      `resmon.exe` is a stub that starts `perfmon.exe`. Measured on `desktop-ib88isg`: the agent
+      launched pid 26852 and the live window was pid 30052, its child. Verified after the fix by
+      killing the window and watching one launch line name the pid that was still standing
 
 ### Implemented, Not Yet Verified Live ⏳
 - [ ] **Adaptive power limit.** Five rungs (100/75/50/25/0) chosen from the CPU load of everything
@@ -460,9 +469,6 @@ xmrig-fleet/
       launched into the interactive session by the machinery that already places Task Manager
       there — which would also settle whether polling counters from *that* session is what the
       Task Manager workaround has really been doing all along
-- [ ] `upgrade-agents`: console-driven agent self-update. Written and unit-tested, but no node
-      has yet been rolled over with it — the one node that needed it was locked out by a token
-      mismatch at the time, which is exactly the case the command refuses to touch
 - [ ] Interactive TUI rendering in a real terminal (the development session had
       redirected output; the console correctly refuses and prints CLI usage instead)
 - [ ] `install-agent.ps1` service registration and firewall scoping on a clean node
@@ -526,8 +532,18 @@ xmrig-fleet/
   `Win32PrioritySeparation`, and simply having a window open - Notepad changes nothing. What
   survives is that the effect tracks a ~7 GB swing in memory in use, the same signature as the
   Xeon's `explorer.exe` leak, so one mechanism may explain both machines. `SessionMonitorService`
-  keeps Task Manager open as an opt-in per-node workaround. It is a remedy without a diagnosis
-  and both the code and the console say so.
+  keeps Task Manager open as an opt-in per-node workaround, falling back to Resource Monitor on
+  a node whose Task Manager will not run — the two were measured at 7,092 and 7,097 H/s, so the
+  choice costs nothing. It is a remedy without a diagnosis and both the code and the console
+  say so.
+- **One node showed `taskmgr.exe` failing to load with a missing `ImageList_CoCreateInstance`
+  entry point, and the cause was never found.** `desktop-ib88isg`, during a spell when the agent
+  was relaunching Task Manager every thirty seconds, put a loader error dialog on the operator's
+  desktop at that same cadence. Nothing on the node explains it: the WinSxS Common-Controls v6
+  assemblies are present, there are no `SideBySide` events, no `comctl32.dll` shadows the real
+  one on `PATH`, `AppInit_DLLs` is empty, and Task Manager starts normally by hand and from a
+  remote shell. The Resource Monitor fallback exists so such a node still gets its window; it is
+  not a fix for whatever this was.
 - **A node that loses its huge pages runs several times slower with no other symptom.**
   Measured on the Xeon E5-2680 v4: 5.97 kH/s at 100% allocation against 1.34 kH/s at 11%,
   a 4.5x swing from memory fragmentation alone. The `Pages` column now exposes it; the
@@ -556,7 +572,7 @@ xmrig-fleet/
 
 **Document Version**: v1.1
 **Last Updated**: 2026-09-01
-**Product Version**: 1.8.4
+**Product Version**: 1.9.3
 **Status**: Active
 **Repository**: `c:\Repos\xmrig-fleet` (branch `master`), published at
 [github.com/XYphrodite/xmrig-fleet](https://github.com/XYphrodite/xmrig-fleet)
