@@ -287,7 +287,13 @@ dotnet run --project src/XmrigFleet.Console     # interactive TUI
 
 `install-agent.ps1` copies the payload to `C:\Program Files\xmrig-fleet-agent`, writes
 `appsettings.json`, registers the service with SCM restart actions, opens the port to
-`100.64.0.0/10` **only**, and verifies the API answers. For Linux nodes,
+`100.64.0.0/10` **only**, and verifies the API answers. It also kills any agent left running
+outside the service — one started by hand for diagnosis holds port 47800, and the service then
+refuses to start with a message that names no cause — and puts the install directory on the
+machine `PATH`, which is safe only because the agent reads `appsettings.json` from its own
+directory rather than the current one. On failure it points at `agent.log`, not the Windows
+event log: the agent stopped writing there after a node whose Event Log service answers
+"RPC server unavailable" was taken down by the logging call itself. For Linux nodes,
 [deploy/xmrig-fleet-agent.service](deploy/xmrig-fleet-agent.service) is the systemd unit.
 
 ### Installing the console
