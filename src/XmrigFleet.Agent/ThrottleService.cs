@@ -40,6 +40,8 @@ public sealed class ThrottleService : BackgroundService
     /// </summary>
     private double? _minerFullShare;
     private int _fullSharePid;
+    /// <summary>Set only for a guessed share, so a miner whose API comes back is asked again.</summary>
+    private DateTimeOffset? _shareExpiresAt;
 
     private SystemLoad _lastLoad;
     private bool _wasEnabled;
@@ -177,22 +179,30 @@ public sealed class ThrottleService : BackgroundService
     /// </summary>
     private async Task<double> FullShareAsync(int pid, CancellationToken ct)
     {
-        if (_fullSharePid == pid && _minerFullShare is { } cached) return cached;
+        if (_fullSharePid == pid && _minerFullShare is { } cached
+            && (_shareExpiresAt is null || _shareExpiresAt > DateTimeOffset.UtcNow))
+            return cached;
 
         var threads = (await _miner.GetStatusAsync(ct)).MiningThreads;
         var cores = Environment.ProcessorCount;
 
         if (threads is not > 0 || cores <= 0)
         {
-            // The miner's API is unreachable. Capping as a share of the machine is wrong, but it
-            // is wrong in the direction of limiting too hard, and this service exists to get out
-            // of somebody's way. Not cached, so the next tick asks again.
-            _log.LogDebug("Throttle: miner did not report its thread count; limiting by machine share");
+            // The miner's API is unreachable - a miner this agent did not start holds its own
+            // token, and the fleet already reports that as "mining (no api)". Capping as a share
+            // of the machine is wrong, but wrong towards limiting too hard, and this service
+            // exists to get out of somebody's way.
+            //
+            // Cached only briefly. Not caching at all would put a three-second HTTP timeout in
+            // every one-second tick; caching for good would never notice the miner coming back.
+            (_fullSharePid, _minerFullShare) = (pid, 100);
+            _shareExpiresAt = DateTimeOffset.UtcNow.AddSeconds(30);
+            _log.LogDebug("Throttle: the miner did not report its thread count; limiting by machine share");
             return 100;
         }
 
         var share = Math.Clamp(100.0 * threads.Value / cores, 1, 100);
-        (_fullSharePid, _minerFullShare) = (pid, share);
+        (_fullSharePid, _minerFullShare, _shareExpiresAt) = (pid, share, null);
         _log.LogInformation("Throttle: the miner takes {Share:0}% of this machine at full speed ({Threads} threads on {Cores} CPUs)",
             share, threads.Value, cores);
 
@@ -300,7 +310,7 @@ public sealed class ThrottleService : BackgroundService
             // this the next sample counts its own spin-up as somebody else's load.
             _loadReader.Reset();
             // A new process may have a different thread count, so its appetite is measured afresh.
-            (_minerFullShare, _fullSharePid) = (null, 0);
+            (_minerFullShare, _fullSharePid, _shareExpiresAt) = (null, 0, null);
             _log.LogInformation("Throttle: started the miner again ({Reason})", reason);
             return true;
         }
