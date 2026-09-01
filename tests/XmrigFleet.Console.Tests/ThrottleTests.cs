@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using XmrigFleet.Agent;
 using XmrigFleet.Console;
 using XmrigFleet.Contracts;
@@ -98,8 +99,8 @@ public class ThrottleTests
             Throttle = new ThrottleSettingsDto { Steps = tuned, FloorLevel = 25, RampUpSeconds = 300 },
         });
 
-        // The console sends exactly this when an operator flips the switch. Replacing the whole
-        // object here would silently take a week of tuning with it.
+        // Replacing the whole object on any push would take a week of tuning with it. The console
+        // always sends the full rules, but nothing in the contract says a caller must.
         var saved = store.Update(new MinerConfigDto { Throttle = new ThrottleSettingsDto { Enabled = true } });
 
         Assert.True(saved.Throttle!.Enabled);
@@ -159,6 +160,42 @@ public class ThrottleTests
         var resolved = config.ThrottleFor(config.Nodes[0]);
         Assert.NotEmpty(resolved.Steps!);
         Assert.Equal(ThrottleSettingsDto.DefaultSteps.Count, resolved.Steps!.Count);
+    }
+
+    [Fact]
+    public void A_fresh_limit_never_claims_the_miner_is_already_uncapped()
+    {
+        // The job object outlives the agent, so a restarted agent inherits whatever cap the last
+        // one left. Reporting 100 before applying anything would let the caller skip the very call
+        // that lifts an inherited 25%, and the node would mine at a quarter speed in silence.
+        var limit = new MinerCpuLimit(NullLogger<MinerCpuLimit>.Instance);
+        Assert.NotEqual(100, limit.AppliedLevel);
+
+        limit.Forget();
+        Assert.NotEqual(100, limit.AppliedLevel);
+    }
+
+    [Fact]
+    public void The_first_load_sample_is_not_usable()
+    {
+        // A CPU percentage is the difference between two samples. Handing the ladder a zero here
+        // would read as a machine nobody is using.
+        var reader = new SystemLoadReader();
+        Assert.False(reader.Read().Usable);
+    }
+
+    [Fact]
+    public void A_reset_makes_the_next_sample_unusable_again()
+    {
+        // Reset is called after the throttle restarts the miner: the new process starts its CPU
+        // time from zero, and without this the miner's own spin-up would be counted as somebody
+        // else's load - which would have the throttle stop the miner it had just started.
+        var reader = new SystemLoadReader();
+        reader.Read();
+        reader.Read();
+
+        reader.Reset();
+        Assert.False(reader.Read().Usable);
     }
 
     private sealed class TempDirectory : IDisposable

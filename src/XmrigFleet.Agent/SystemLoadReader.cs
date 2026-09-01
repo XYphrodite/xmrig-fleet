@@ -8,11 +8,16 @@ namespace XmrigFleet.Agent;
 /// <param name="MinerCpuPercent">The miner alone.</param>
 /// <param name="OtherCpuPercent">What is left: the load the throttle is meant to get out of the way of.</param>
 /// <param name="MemoryUsedPercent">Physical memory in use.</param>
+/// <param name="Usable">
+/// False when this sample cannot be trusted and the caller must hold its current decision.
+/// See <see cref="SystemLoadReader.Read"/> for the two ways that happens.
+/// </param>
 public readonly record struct SystemLoad(
     double TotalCpuPercent,
     double MinerCpuPercent,
     double OtherCpuPercent,
-    double MemoryUsedPercent);
+    double MemoryUsedPercent,
+    bool Usable);
 
 /// <summary>
 /// Cheap, once-a-second load sampling for the throttle.
@@ -35,26 +40,38 @@ public sealed class SystemLoadReader
     private bool _primed;
 
     /// <summary>
-    /// Load since the previous call. The first call primes the counters and reports zero: CPU
-    /// percentages are differences between two samples, and there is nothing to subtract yet.
+    /// Load since the previous call.
+    ///
+    /// Two situations produce an unusable sample, and both matter more than they look:
+    ///
+    /// 1. The miner restarted between samples, so its accumulated CPU time went backwards. Taking
+    ///    its share as zero would count the new miner's own spin-up as somebody else's work, and
+    ///    a caller reading the ladder would stop the miner an operator had just started by hand.
+    /// 2. A miner is running but its CPU time cannot be read - an agent without the rights to
+    ///    query another user's process. Its share then reads as zero forever, the miner's own load
+    ///    counts as everybody else's, and the throttle stops it, sees a quiet machine, starts it,
+    ///    and stops it again. An unusable sample is far better than that loop.
+    ///
+    /// The first call after construction or <see cref="Reset"/> is unusable for a duller reason:
+    /// a CPU percentage is the difference between two samples and there is only one.
     /// </summary>
     public SystemLoad Read()
     {
         var memory = ReadMemoryPercent();
 
         if (!GetSystemTimes(out var idle, out var kernel, out var user))
-            return new SystemLoad(0, 0, 0, memory);
+            return Unusable(memory);
 
         var idleTicks = ToTicks(idle);
         var kernelTicks = ToTicks(kernel);
         var userTicks = ToTicks(user);
-        var minerTicks = ReadMinerTicks();
+        var (minerTicks, minerKnown) = ReadMinerTicks();
 
         if (!_primed)
         {
-            (_lastIdle, _lastKernel, _lastUser, _lastMinerTicks, _primed) =
-                (idleTicks, kernelTicks, userTicks, minerTicks, true);
-            return new SystemLoad(0, 0, 0, memory);
+            Remember(idleTicks, kernelTicks, userTicks, minerTicks);
+            _primed = true;
+            return Unusable(memory);
         }
 
         // GetSystemTimes counts kernel time with idle time inside it, and every figure is summed
@@ -64,49 +81,63 @@ public sealed class SystemLoadReader
         var idleDelta = idleTicks - _lastIdle;
         var minerDelta = minerTicks - _lastMinerTicks;
 
-        (_lastIdle, _lastKernel, _lastUser, _lastMinerTicks) = (idleTicks, kernelTicks, userTicks, minerTicks);
+        Remember(idleTicks, kernelTicks, userTicks, minerTicks);
 
-        if (totalDelta <= 0) return new SystemLoad(0, 0, 0, memory);
+        if (totalDelta <= 0) return Unusable(memory);
+        if (minerDelta < 0 || !minerKnown) return Unusable(memory);
 
-        var total = 100.0 * (totalDelta - idleDelta) / totalDelta;
-        var miner = 100.0 * minerDelta / totalDelta;
-
-        // A miner that restarted between samples reports negative time; clamping keeps one odd
-        // sample from reading as an idle machine and letting everything back up to full speed.
-        total = Math.Clamp(total, 0, 100);
-        miner = Math.Clamp(miner, 0, 100);
+        var total = Math.Clamp(100.0 * (totalDelta - idleDelta) / totalDelta, 0, 100);
+        var miner = Math.Clamp(100.0 * minerDelta / totalDelta, 0, 100);
 
         return new SystemLoad(
             Math.Round(total, 1),
             Math.Round(miner, 1),
             Math.Round(Math.Max(0, total - miner), 1),
-            memory);
+            memory,
+            Usable: true);
     }
+
+    private void Remember(long idle, long kernel, long user, long miner) =>
+        (_lastIdle, _lastKernel, _lastUser, _lastMinerTicks) = (idle, kernel, user, miner);
+
+    private static SystemLoad Unusable(double memory) => new(0, 0, 0, memory, Usable: false);
 
     /// <summary>Forgets the previous sample, so the next reading starts a fresh difference.</summary>
     public void Reset() => _primed = false;
 
-    private static long ReadMinerTicks()
+    /// <summary>
+    /// The miner's combined CPU time, and whether it is really known.
+    ///
+    /// "Known" is not the same as "non-zero": no miner at all is a perfectly good answer of zero,
+    /// while a miner whose time could not be read is no answer and must be said so. Conflating
+    /// the two is what would make the throttle mistake the miner's own load for somebody else's.
+    /// </summary>
+    private static (long Ticks, bool Known) ReadMinerTicks()
     {
-        long ticks = 0;
         Process[] found;
-
         try { found = Process.GetProcessesByName(MinerProcessName); }
-        catch (InvalidOperationException) { return 0; }
+        catch (InvalidOperationException) { return (0, false); }
+
+        long ticks = 0;
+        var read = 0;
 
         foreach (var process in found)
         {
             // Several miner processes are unusual but possible - one adopted, one started - and
             // the throttle cares about their combined share, not about which is which.
-            try { ticks += process.TotalProcessorTime.Ticks; }
+            try
+            {
+                ticks += process.TotalProcessorTime.Ticks;
+                read++;
+            }
             catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
             {
-                // Exited between the listing and the read, or refused a handle. Skip it.
+                // Exited between the listing and the read, or refused a handle.
             }
             finally { process.Dispose(); }
         }
 
-        return ticks;
+        return (ticks, read == found.Length);
     }
 
     private static double ReadMemoryPercent()

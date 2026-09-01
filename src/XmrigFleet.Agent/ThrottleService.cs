@@ -31,6 +31,8 @@ public sealed class ThrottleService : BackgroundService
 
     private SystemLoad _lastLoad;
     private bool _wasEnabled;
+    private DateTimeOffset _lastStartComplaint = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastLimitComplaint = DateTimeOffset.MinValue;
 
     public ThrottleService(
         MinerConfigStore config,
@@ -93,7 +95,10 @@ public sealed class ThrottleService : BackgroundService
 
         if (settings?.Enabled != true)
         {
-            if (_wasEnabled) await StandDownAsync(ct);
+            // The second half of that condition is not redundant. A node whose miner this service
+            // stopped, that then restarted into a build with throttling switched off, would never
+            // see _wasEnabled true and would sit there not mining with nothing to explain it.
+            if (_wasEnabled || config.MinerStoppedByThrottle == true) await StandDownAsync(ct);
             return;
         }
 
@@ -106,34 +111,46 @@ public sealed class ThrottleService : BackgroundService
         }
 
         var load = _loadReader.Read();
-        lock (_gate) _lastLoad = load;
+        var now = DateTimeOffset.UtcNow;
+        int previous, level;
+        string reason;
 
-        var previous = _ladder.Current;
-
-        if (settings.ManualLevel is { } pinned)
+        lock (_gate)
         {
-            _ladder.Force(Math.Clamp(pinned, 0, 100), "pinned by the operator; automation is standing down", DateTimeOffset.UtcNow);
+            if (load.Usable) _lastLoad = load;
+            previous = _ladder.Current;
+
+            if (settings.ManualLevel is { } pinned)
+            {
+                _ladder.Force(Math.Clamp(pinned, 0, 100), "pinned by the operator; automation is standing down", now);
+            }
+            else if (load.Usable)
+            {
+                _ladder.Update(
+                    load.OtherCpuPercent,
+                    settings.Steps is { Count: > 0 } steps ? steps : ThrottleSettingsDto.DefaultSteps,
+                    Math.Clamp(settings.FloorLevel ?? 0, 0, 100),
+                    Math.Max(1, settings.RampUpSeconds ?? 120),
+                    now);
+            }
+            // An unusable sample holds the current rung rather than guessing at one. Guessing low
+            // stops a miner for nothing; guessing high hands the machine back to a miner while
+            // somebody is working on it. Neither is worth doing on no information.
+
+            level = _ladder.Current;
+            reason = _ladder.Reason;
         }
-        else
-        {
-            _ladder.Update(
-                load.OtherCpuPercent,
-                settings.Steps is { Count: > 0 } steps ? steps : ThrottleSettingsDto.DefaultSteps,
-                Math.Clamp(settings.FloorLevel ?? 0, 0, 100),
-                Math.Max(1, settings.RampUpSeconds ?? 120),
-                DateTimeOffset.UtcNow);
-        }
 
-        await ApplyAsync(_ladder.Current, ct);
+        await ApplyAsync(level, reason, ct);
 
-        if (_ladder.Current != previous)
+        if (level != previous)
         {
-            _decisions.Record(previous, _ladder.Current, _ladder.Reason, load);
-            _log.LogInformation("Throttle {From}% -> {To}% ({Reason})", previous, _ladder.Current, _ladder.Reason);
+            _decisions.Record(previous, level, reason, load);
+            _log.LogInformation("Throttle {From}% -> {To}% ({Reason})", previous, level, reason);
         }
     }
 
-    private async Task ApplyAsync(int level, CancellationToken ct)
+    private async Task ApplyAsync(int level, string reason, CancellationToken ct)
     {
         var stoppedByUs = _config.Current.MinerStoppedByThrottle == true;
         var pid = _miner.RunningPid();
@@ -142,7 +159,7 @@ public sealed class ThrottleService : BackgroundService
         {
             if (pid is null) return;
 
-            _log.LogWarning("Throttle: stopping the miner to release its memory ({Reason})", _ladder.Reason);
+            _log.LogWarning("Throttle: stopping the miner to release its memory ({Reason})", reason);
             var result = await _miner.StopAsync(ct);
             _limit.Forget();
             // Recorded before checking success: a stop that half-worked still means this service,
@@ -157,18 +174,9 @@ public sealed class ThrottleService : BackgroundService
             // Only a miner this service stopped is started again. An operator who stopped mining
             // deliberately must not find it running because the machine went quiet.
             if (!stoppedByUs) return;
-
-            _log.LogInformation("Throttle: starting the miner again ({Reason})", _ladder.Reason);
-            var result = await _miner.StartAsync(ct);
-            _config.Update(new MinerConfigDto { MinerStoppedByThrottle = false });
-            if (!result.Ok)
-            {
-                _log.LogWarning("Throttle could not start the miner: {Message}", result.Message);
-                return;
-            }
+            if (!await ResumeAsync(reason, ct)) return;
 
             pid = _miner.RunningPid();
-            _loadReader.Reset();
             if (pid is null) return;
         }
         else if (stoppedByUs)
@@ -179,8 +187,37 @@ public sealed class ThrottleService : BackgroundService
 
         if (_limit.AppliedLevel == level) return;
 
-        if (!_limit.Apply(pid.Value, level, out var detail))
-            _log.LogWarning("Throttle could not hold the miner at {Level}%: {Detail}", level, detail);
+        if (_limit.Apply(pid.Value, level, out var detail)) return;
+
+        // Retried every tick rather than given up on, because the usual cause - the miner having
+        // just restarted under a new pid - fixes itself. The complaint is rate limited so a node
+        // that really cannot be capped says so without writing a line a second forever.
+        if (DateTimeOffset.UtcNow - _lastLimitComplaint <= TimeSpan.FromMinutes(1)) return;
+        _lastLimitComplaint = DateTimeOffset.UtcNow;
+        _log.LogWarning("Throttle could not hold the miner at {Level}%: {Detail}", level, detail);
+    }
+
+    /// <summary>
+    /// Lifts the cap on the way out, so stopping the agent does not leave a rig limited.
+    ///
+    /// The job object outlives this process on purpose, which means a cap left behind would keep
+    /// holding the miner down with nothing running to explain it. Not reached when the agent
+    /// exits abruptly - a self-update does exactly that - and that case is covered instead by the
+    /// next agent re-opening the named job and taking control of the limit it inherited.
+    /// </summary>
+    public override async Task StopAsync(CancellationToken ct)
+    {
+        await base.StopAsync(ct);
+
+        try
+        {
+            if (_miner.RunningPid() is { } pid && _limit.Apply(pid, 100, out var detail))
+                _log.LogInformation("Throttle: {Detail} on the way out", detail);
+        }
+        catch (Exception ex)
+        {
+            _log.LogDebug(ex, "Could not lift the CPU limit while stopping");
+        }
     }
 
     /// <summary>Undoes everything this service did, so switching it off really switches it off.</summary>
@@ -191,12 +228,38 @@ public sealed class ThrottleService : BackgroundService
         if (_miner.RunningPid() is { } pid) _limit.Apply(pid, 100, out _);
         _ladder.Force(100, "throttling is off", DateTimeOffset.UtcNow);
 
-        if (_config.Current.MinerStoppedByThrottle == true)
+        if (_config.Current.MinerStoppedByThrottle == true) await ResumeAsync("throttling is off", ct);
+    }
+
+    /// <summary>
+    /// Starts the miner this service had stopped, and only then forgets that it stopped it.
+    ///
+    /// The order matters. Clearing the flag first and finding out afterwards that the start failed
+    /// leaves a node not mining with nothing left to say who stopped it or that anything should
+    /// start it again - the miner would simply be off until somebody noticed. Keeping the flag
+    /// until the miner is really running costs a retry a second, which the throttled log below
+    /// keeps from filling the disk.
+    /// </summary>
+    private async Task<bool> ResumeAsync(string reason, CancellationToken ct)
+    {
+        var result = await _miner.StartAsync(ct);
+
+        if (result.Ok)
         {
-            _log.LogInformation("Throttling switched off; starting the miner it had stopped");
-            var result = await _miner.StartAsync(ct);
             _config.Update(new MinerConfigDto { MinerStoppedByThrottle = false });
-            if (!result.Ok) _log.LogWarning("Could not start the miner again: {Message}", result.Message);
+            // The miner's accumulated CPU time restarts from zero with the new process; without
+            // this the next sample counts its own spin-up as somebody else's load.
+            _loadReader.Reset();
+            _log.LogInformation("Throttle: started the miner again ({Reason})", reason);
+            return true;
         }
+
+        if (DateTimeOffset.UtcNow - _lastStartComplaint > TimeSpan.FromMinutes(1))
+        {
+            _lastStartComplaint = DateTimeOffset.UtcNow;
+            _log.LogWarning("Throttle cannot start the miner it stopped: {Message}", result.Message);
+        }
+
+        return false;
     }
 }

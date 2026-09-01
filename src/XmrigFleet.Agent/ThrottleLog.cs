@@ -25,10 +25,17 @@ public sealed class ThrottleLog
 
     public void Record(int from, int to, string reason, SystemLoad load)
     {
+        // Also in threads, because the percentage alone hides the thing most likely to need
+        // fixing: the ladder is read against the whole machine, so one thread of somebody's work
+        // is 8% on a 12-thread node and 3.6% on a 28-thread one. The same rung means different
+        // amounts of interference on different rigs, and this column is what will show it.
+        var busyThreads = load.OtherCpuPercent * Environment.ProcessorCount / 100.0;
+
         var line = string.Format(
             CultureInfo.InvariantCulture,
-            "{0:yyyy-MM-dd HH:mm:ss}  {1,3} -> {2,-3}  cpu={3:0.#}% other={4:0.#}% miner={5:0.#}% mem={6:0}%  {7}",
-            DateTime.Now, from, to, load.TotalCpuPercent, load.OtherCpuPercent, load.MinerCpuPercent, load.MemoryUsedPercent, reason);
+            "{0:yyyy-MM-dd HH:mm:ss}  {1,3} -> {2,-3}  cpu={3:0.#}% other={4:0.#}% ({5:0.0} of {6} threads) miner={7:0.#}% mem={8:0}%  {9}",
+            DateTime.Now, from, to, load.TotalCpuPercent, load.OtherCpuPercent,
+            busyThreads, Environment.ProcessorCount, load.MinerCpuPercent, load.MemoryUsedPercent, reason);
 
         lock (_gate)
         {
