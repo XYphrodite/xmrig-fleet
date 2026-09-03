@@ -284,10 +284,14 @@ if (-not [string]::IsNullOrWhiteSpace($PublicKey)) {
         $keyFile = Join-Path $env:ProgramData 'ssh\administrators_authorized_keys'
         # Only Administrators and SYSTEM may write it, or sshd ignores the file and says
         # so only in its own log, where the operator will not think to look.
-        $acl = { & icacls.exe $keyFile /inheritance:r /grant 'Administrators:F' /grant 'SYSTEM:F' | Out-Null }
+        # By SID, for the same reason the group membership above is checked by SID: these
+        # accounts are localised, and "Administrators" on a Russian Windows makes icacls fail
+        # with "no mapping between account names and security IDs". S-1-5-32-544 is the
+        # Administrators group, S-1-5-18 is SYSTEM.
+        $acl = { & icacls.exe $keyFile /inheritance:r /grant '*S-1-5-32-544:F' /grant '*S-1-5-18:F' | Out-Null }
     } else {
         $keyFile = Join-Path (Join-Path 'C:\Users' $UserName) '.ssh\authorized_keys'
-        $acl = { & icacls.exe $keyFile /inheritance:r /grant "${UserName}:F" /grant 'SYSTEM:F' | Out-Null }
+        $acl = { & icacls.exe $keyFile /inheritance:r /grant "*$($account.SID.Value):F" /grant '*S-1-5-18:F' | Out-Null }
     }
 
     $null = New-Item -ItemType Directory -Force -Path (Split-Path $keyFile)
@@ -316,13 +320,25 @@ if (Test-Path $configPath) {
 
     function Set-SshOption {
         param([string[]]$Lines, [string]$Name, [string]$Value)
-        # Comment out every existing occurrence, commented or not, then append one
+
+        # Comment out every existing occurrence, commented or not, then write one
         # authoritative line: sshd honours the *first* match, so editing in place would
         # leave a stale earlier line in charge.
-        $out = foreach ($line in $Lines) {
+        $out = @(foreach ($line in $Lines) {
             if ($line -match "^\s*#?\s*$Name\s") { "# (xmrig-fleet) $line" } else { $line }
-        }
-        @($out) + "$Name $Value"
+        })
+
+        # Placed before the first Match block rather than at the end of the file. Everything
+        # after a Match line belongs to that block, and Windows ships an sshd_config that ends
+        # with "Match Group administrators" - so appending put Port inside it, which sshd
+        # rejects outright, and the service then would not start at all. Seen on a live node.
+        $firstMatch = 0
+        while ($firstMatch -lt $out.Count -and $out[$firstMatch] -notmatch '^\s*Match\s') { $firstMatch++ }
+
+        if ($firstMatch -ge $out.Count) { return $out + "$Name $Value" }
+        # Guarded because PowerShell reads $out[0..-1] as the whole array rather than none of it.
+        if ($firstMatch -eq 0) { return @("$Name $Value") + $out }
+        return $out[0..($firstMatch - 1)] + "$Name $Value" + $out[$firstMatch..($out.Count - 1)]
     }
 
     $config = Set-SshOption $config 'Port' $Port
@@ -333,6 +349,20 @@ if (Test-Path $configPath) {
 
     Set-Content -Path $configPath -Value $config -Encoding ascii
     Write-Host "sshd_config: port $Port, public keys on, passwords $(if ($AllowPasswordAuth) { 'left enabled' } else { 'off' })."
+
+    # Asked before restarting, because a service that will not start says only that it would
+    # not start. sshd -t names the file and line, which is the difference between a fix and
+    # an evening. The binary is located through the service rather than assumed: the Windows
+    # component and the upstream MSI install it to different directories.
+    $imagePath = (Get-CimInstance Win32_Service -Filter "Name='sshd'").PathName
+    $sshdExe = $imagePath.Trim('"').Split('"')[0]
+    if (Test-Path $sshdExe) {
+        $check = & $sshdExe -t -f $configPath 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "sshd rejected the configuration and was left running as it was:`n$($check -join "`n")"
+        }
+    }
+
     Restart-Service sshd
 }
 
