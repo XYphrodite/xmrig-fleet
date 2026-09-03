@@ -116,7 +116,8 @@ public sealed record MinerConfigDto
     public double? PowerFallbackWatts { get; init; }
 
     /// <summary>
-    /// Keep Task Manager running minimised in the node's interactive session.
+    /// Keep a monitor window - Resource Monitor by preference - running hidden in the node's
+    /// interactive session.
     ///
     /// This is a remedy without a diagnosis, and it is worth saying so plainly: on an
     /// i7-12700KF the miner runs at 4,380 H/s with nothing watching and 7,092 H/s with Task

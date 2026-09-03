@@ -496,6 +496,17 @@ xmrig-fleet/
 - [ ] Automatic miner restart when a node reports zero hashrate while mining
 
 ### Known Issues / Risks ⚠️
+- **A hidden monitor window makes that monitor unopenable for the person at the machine.** Task
+  Manager is single-instance per session, so a hidden instance does not sit quietly beside a new
+  one - it swallows it. Measured with nothing running to begin with: starting one hidden gives one
+  process and no window; starting another normally gives the *same* process, still no window, and
+  no new one. The operator presses Ctrl+Shift+Esc and nothing at all happens, which is exactly how
+  it was reported. `SessionMonitorService` therefore prefers Resource Monitor, worth the same
+  hashrate (7,097 H/s against 7,092) and missed far less often. Both are single-instance, so this
+  moves the nuisance rather than removing it; removing it means a purpose-built helper nobody ever
+  wants to open. Note that a node already holding a hidden Task Manager keeps holding it after the
+  update, because the agent adopts what it finds - switching that node's monitor off and on again
+  is what replaces it.
 - **A CPU cap costs more hashrate than it saves CPU, and the penalty is mostly a fixed toll for
   capping at all.** Measured on the i5 with the miner untouched between readings and its huge
   pages intact throughout: 2,210 H/s uncapped, 610 at rung 50 (27.6%), 325 at rung 25 (14.7%),

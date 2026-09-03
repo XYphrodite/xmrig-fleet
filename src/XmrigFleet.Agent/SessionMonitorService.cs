@@ -186,14 +186,29 @@ public sealed class SessionMonitorService : BackgroundService
     private sealed record MonitorKind(string Executable, string[] ProcessNames, string Label);
 
     /// <summary>
-    /// Tried in order. Task Manager first only because it is what the measurements were taken
-    /// with; desktop-ib88isg met a comctl32 entry-point failure that killed every Task Manager
-    /// on sight, and the point of the second entry is that such a node still gets its window.
+    /// Tried in order, and Resource Monitor comes first for a reason that cost an operator an
+    /// afternoon: Task Manager is single-instance per session, so a hidden one does not merely sit
+    /// there - it swallows every later attempt to open Task Manager. Measured directly, with no
+    /// instance running to begin with:
+    ///
+    ///     start hidden          one process, no window
+    ///     start again, normally same process, still no window, and no new one
+    ///
+    /// The person at the machine presses Ctrl+Shift+Esc and nothing whatsoever happens. Resource
+    /// Monitor is worth the same hashrate (7 097 H/s against 7 092) and is a tool nobody reaches
+    /// for daily, so squatting on it costs far less. Task Manager stays as the fallback for a node
+    /// where Resource Monitor will not run.
+    ///
+    /// Both are single-instance, so this moves the nuisance rather than removing it. Removing it
+    /// means a purpose-built helper that no human ever wants to open, which is the plan.
+    ///
+    /// <para><see cref="ProcessNames"/> is a list because the executable that is launched is not
+    /// the process that survives: resmon.exe is a stub that starts perfmon.exe and exits.</para>
     /// </summary>
     private static readonly MonitorKind[] Monitors =
     {
-        new("taskmgr.exe", new[] { "Taskmgr" }, "Task Manager"),
         new("resmon.exe", new[] { "resmon", "perfmon" }, "Resource Monitor"),
+        new("taskmgr.exe", new[] { "Taskmgr" }, "Task Manager"),
     };
 
     /// <summary>

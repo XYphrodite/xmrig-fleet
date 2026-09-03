@@ -147,7 +147,13 @@ public sealed class MinerScreen
         UiHelpers.Header("Session monitor");
 
         AnsiConsole.MarkupLine(
-            "Keeps Task Manager open, minimised, in the node's own logged-on session.");
+            "Keeps a monitor window open, hidden, in the node's own logged-on session.");
+        AnsiConsole.MarkupLine(
+            "[yellow]Resource Monitor, not Task Manager[/]: both are single-instance, so a hidden one");
+        AnsiConsole.MarkupLine(
+            "makes that tool unopenable for whoever sits at the machine - Ctrl+Shift+Esc does");
+        AnsiConsole.MarkupLine(
+            "nothing at all. Resource Monitor is worth the same hashrate and is missed far less.");
         AnsiConsole.MarkupLine(
             "[grey]Measured on an i7-12700KF: 4,380 H/s with nothing watching, 7,092 H/s with[/]");
         AnsiConsole.MarkupLine(
