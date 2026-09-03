@@ -72,7 +72,7 @@ $ErrorActionPreference = 'Stop'
 # the previous copy - and an operator then reads output that does not match the source and
 # concludes the fix did not work. That happened twice in one evening. Printing the version
 # turns "which copy ran" from a deduction into the first line of output.
-$ScriptVersion = '2026-09-03.1'
+$ScriptVersion = '2026-09-03.2'
 Write-Host "install-openssh.ps1 $ScriptVersion"
 
 # Records that this node cannot fetch Features on Demand, so later runs skip the wait
@@ -271,8 +271,19 @@ else {
 
 # One run of sshd creates the host keys and the default sshd_config, so start it before
 # editing either.
+#
+# Best-effort, not required. A node whose sshd_config is already bad cannot start the
+# service at all, and this is the script that repairs such a config - so throwing here would
+# make the repair unreachable and leave the node broken by the only tool able to fix it.
+# That is exactly what happened on a live node. The restart after the config is written is
+# the one that has to succeed, and it does throw.
 Set-Service -Name sshd -StartupType Automatic
-Start-Service -Name sshd
+try {
+    Start-Service -Name sshd
+}
+catch {
+    Write-Host '    sshd would not start yet; carrying on to rewrite its configuration' -ForegroundColor Yellow
+}
 
 # The agent key service is what makes `ssh-add` work on the node itself; it is disabled
 # out of the box and is not needed to accept logins, so leave a node's choice alone.
@@ -328,7 +339,26 @@ if (-not [string]::IsNullOrWhiteSpace($PublicKey)) {
 
 # ---------------------------------------------------------------------- sshd_config
 
+# Located through the service rather than assumed: the Windows component and the upstream
+# MSI install sshd to different directories.
+$imagePath = (Get-CimInstance Win32_Service -Filter "Name='sshd'").PathName
+$sshdExe = $imagePath.Trim('"').Split('"')[0]
+
 $configPath = Join-Path $env:ProgramData 'ssh\sshd_config'
+
+# sshd writes this file on its first successful run, so a node where it has never started -
+# which is precisely the node this script is trying to rescue - has no config to edit and
+# would silently skip every setting below. Seed it from the default that ships beside the
+# binary instead.
+if (-not (Test-Path $configPath)) {
+    $default = Join-Path (Split-Path $sshdExe) 'sshd_config_default'
+    if (Test-Path $default) {
+        Write-Host '==> sshd has never run here; seeding sshd_config from the shipped default'
+        $null = New-Item -ItemType Directory -Force -Path (Split-Path $configPath)
+        Copy-Item $default $configPath
+    }
+}
+
 if (Test-Path $configPath) {
     $config = Get-Content $configPath
 
@@ -366,10 +396,7 @@ if (Test-Path $configPath) {
 
     # Asked before restarting, because a service that will not start says only that it would
     # not start. sshd -t names the file and line, which is the difference between a fix and
-    # an evening. The binary is located through the service rather than assumed: the Windows
-    # component and the upstream MSI install it to different directories.
-    $imagePath = (Get-CimInstance Win32_Service -Filter "Name='sshd'").PathName
-    $sshdExe = $imagePath.Trim('"').Split('"')[0]
+    # an evening.
     if (Test-Path $sshdExe) {
         $check = & $sshdExe -t -f $configPath 2>&1
         if ($LASTEXITCODE -ne 0) {
