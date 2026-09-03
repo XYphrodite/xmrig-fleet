@@ -61,6 +61,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Records that this node cannot fetch Features on Demand, so later runs skip the wait
+# rather than rediscovering it five minutes at a time. See Get-BlockedUpdateReason.
+$script:CapabilityGaveUpMarker = Join-Path $env:ProgramData 'xmrig-fleet\openssh-capability-unavailable.txt'
+
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Run this script from an elevated PowerShell.'
 }
@@ -111,9 +115,22 @@ function Install-FromRelease {
 
     # ADDLOCAL=Server: the client half is not wanted on a rig, and installing it would put
     # a second ssh.exe ahead of the one Windows ships on PATH.
-    $run = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" ADDLOCAL=Server /qn /norestart" -Wait -PassThru
-    if ($run.ExitCode -ne 0) {
-        throw "msiexec failed with exit code $($run.ExitCode) installing $($asset.name)."
+    $arguments = "/i `"$msi`" ADDLOCAL=Server /qn /norestart"
+
+    # 1618 is ERROR_INSTALL_ALREADY_RUNNING, and on this path it is close to expected: the
+    # abandoned component install leaves TiWorker finishing what it started, and Windows
+    # Installer will not begin while servicing holds the lock. Waiting is the whole remedy -
+    # killing TiWorker mid-transaction is how a component store gets broken for real.
+    for ($attempt = 1; ; $attempt++) {
+        $run = Start-Process msiexec.exe -ArgumentList $arguments -Wait -PassThru
+        if ($run.ExitCode -eq 0) { break }
+
+        if ($run.ExitCode -ne 1618 -or $attempt -ge 20) {
+            throw "msiexec failed with exit code $($run.ExitCode) installing $($asset.name)."
+        }
+
+        if ($attempt -eq 1) { Write-Host '    another installer holds the lock; waiting for it' }
+        Start-Sleep -Seconds 15
     }
 
     Remove-Item $msi -ErrorAction SilentlyContinue
@@ -130,6 +147,14 @@ function Install-FromRelease {
     ways no registry key admits to - so a $null here is "no known reason", not a promise.
 #>
 function Get-BlockedUpdateReason {
+    # A node that has already spent five minutes proving it cannot fetch the package should
+    # not spend another five on the next run. Written beside the agent's own state rather
+    # than in the registry so it is obvious, greppable, and trivial to delete when somebody
+    # fixes whatever is wrong with Windows Update on that machine.
+    if (Test-Path $script:CapabilityGaveUpMarker) {
+        return "a previous run already found no component source here (delete $script:CapabilityGaveUpMarker to try again)"
+    }
+
     $policy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'
     $value = (Get-ItemProperty -Path $policy -Name UseWUServer -ErrorAction SilentlyContinue).UseWUServer
     if ($value -eq 1) {
@@ -182,6 +207,13 @@ function Install-Capability {
     Stop-Job $job; Remove-Job $job -Force
     Write-Host "    gave up after $TimeoutMinutes minutes; this node cannot reach a component source" -ForegroundColor Yellow
     Write-Host '    if Windows features misbehave later, run: DISM /Online /Cleanup-Image /RestoreHealth' -ForegroundColor Yellow
+
+    $null = New-Item -ItemType Directory -Force -Path (Split-Path $script:CapabilityGaveUpMarker)
+    Set-Content -Path $script:CapabilityGaveUpMarker -Encoding ascii -Value @(
+        "Add-WindowsCapability for OpenSSH.Server did not finish within $TimeoutMinutes minutes on $(Get-Date -Format s).",
+        'install-openssh.ps1 now goes straight to the upstream MSI on this node.',
+        'Delete this file to make it try the Windows component again.')
+
     Install-FromRelease
 }
 
