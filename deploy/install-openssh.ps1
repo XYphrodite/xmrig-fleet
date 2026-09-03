@@ -120,6 +120,71 @@ function Install-FromRelease {
     Write-Host '    installed'
 }
 
+<#
+.SYNOPSIS
+    Says why this node cannot fetch a Feature on Demand, or $null when it looks able to.
+
+.DESCRIPTION
+    Both causes seen so far make the component install hang for minutes before failing, so
+    it is worth asking first. Neither check is conclusive - Windows Update can be broken in
+    ways no registry key admits to - so a $null here is "no known reason", not a promise.
+#>
+function Get-BlockedUpdateReason {
+    $policy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'
+    $value = (Get-ItemProperty -Path $policy -Name UseWUServer -ErrorAction SilentlyContinue).UseWUServer
+    if ($value -eq 1) {
+        # Features on Demand are then searched for on the WSUS server, which usually does not
+        # carry them, and the call fails with REGDB_E_CLASSNOTREG.
+        return 'this node takes updates from a WSUS server (UseWUServer=1), which will not have the package'
+    }
+
+    $service = Get-Service -Name wuauserv -ErrorAction SilentlyContinue
+    if ($service -and $service.StartType -eq 'Disabled') {
+        return 'the Windows Update service is disabled, so there is nowhere to fetch the package from'
+    }
+
+    return $null
+}
+
+<#
+.SYNOPSIS
+    Installs a Windows capability, giving up rather than hanging, and falling back to the MSI.
+
+.DESCRIPTION
+    Add-WindowsCapability offers no timeout of its own, and on a node that cannot reach a
+    source it sits on a progress bar for a long time before admitting defeat - an operator
+    watched it twice. Run as a job so there is something to abandon.
+
+    Abandoning a running DISM operation is not free: the component store can be left with
+    work pending, which a later "DISM /Online /Cleanup-Image /RestoreHealth" clears. That is
+    said out loud rather than hidden, and it is still better than a script that never returns.
+#>
+function Install-Capability {
+    param([Parameter(Mandatory)][string]$Name, [int]$TimeoutMinutes = 5)
+
+    $job = Start-Job -ScriptBlock { Add-WindowsCapability -Online -Name $using:Name }
+
+    if (Wait-Job $job -Timeout ($TimeoutMinutes * 60)) {
+        try {
+            Receive-Job $job -ErrorAction Stop | Out-Null
+            Remove-Job $job
+            Write-Host '    installed'
+            return
+        }
+        catch {
+            Remove-Job $job -Force
+            Write-Host "    the Windows component would not install: $($_.Exception.Message)" -ForegroundColor Yellow
+            Install-FromRelease
+            return
+        }
+    }
+
+    Stop-Job $job; Remove-Job $job -Force
+    Write-Host "    gave up after $TimeoutMinutes minutes; this node cannot reach a component source" -ForegroundColor Yellow
+    Write-Host '    if Windows features misbehave later, run: DISM /Online /Cleanup-Image /RestoreHealth' -ForegroundColor Yellow
+    Install-FromRelease
+}
+
 # The MSI below registers sshd too, so an sshd that already exists is the end of this
 # step whichever way it got there. Checked before the capability, because a node
 # installed from the MSI reports the capability as absent and would be sent round the
@@ -134,6 +199,13 @@ else {
     if ($capability -and $capability.State -eq 'Installed') {
         Write-Host "==> $($capability.Name) already installed"
     }
+    elseif ($capability -and ($blocked = Get-BlockedUpdateReason)) {
+        # Asked before trying rather than after failing, because the failure mode here is not
+        # a quick error - it is minutes of a progress bar that never moves. Skipping a doomed
+        # attempt is also kinder to the component store than aborting one halfway.
+        Write-Host "==> Skipping the Windows component: $blocked" -ForegroundColor Yellow
+        Install-FromRelease
+    }
     elseif ($capability) {
         # A Feature on Demand, so it is fetched from Windows Update rather than from the
         # installation media. That makes this the one step on a mining node that depends on
@@ -141,14 +213,7 @@ else {
         # search at a server that does not carry the package, and the call fails with
         # REGDB_E_CLASSNOTREG (0x80040154) after a long silent wait. Observed on a live node.
         Write-Host "==> Installing $($capability.Name)"
-        try {
-            Add-WindowsCapability -Online -Name $capability.Name | Out-Null
-            Write-Host '    installed'
-        }
-        catch {
-            Write-Host "    the Windows component would not install: $($_.Exception.Message)" -ForegroundColor Yellow
-            Install-FromRelease
-        }
+        Install-Capability -Name $capability.Name
     }
     else {
         Write-Host '==> This Windows build does not offer the OpenSSH.Server component' -ForegroundColor Yellow
