@@ -33,6 +33,12 @@
         $env:XMRIG_FLEET_SSH_USER = 'local'
         irm https://raw.githubusercontent.com/XYphrodite/xmrig-fleet/master/deploy/install-openssh.ps1 | iex
 
+    That URL is cached for five minutes, so a node re-run straight after a push can be handed
+    the previous copy. Check the version this prints against $ScriptVersion below; when they
+    differ, fetch the commit instead of the branch:
+
+        .../xmrig-fleet/<commit sha>/deploy/install-openssh.ps1
+
     Nothing here touches xmrig or the fleet agent: installing SSH does not interrupt
     mining.
 
@@ -60,6 +66,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Bump this whenever the script changes. raw.githubusercontent.com serves with
+# Cache-Control: max-age=300, so for five minutes after a push a node can still be handed
+# the previous copy - and an operator then reads output that does not match the source and
+# concludes the fix did not work. That happened twice in one evening. Printing the version
+# turns "which copy ran" from a deduction into the first line of output.
+$ScriptVersion = '2026-09-03.1'
+Write-Host "install-openssh.ps1 $ScriptVersion"
 
 # Records that this node cannot fetch Features on Demand, so later runs skip the wait
 # rather than rediscovering it five minutes at a time. See Get-BlockedUpdateReason.
