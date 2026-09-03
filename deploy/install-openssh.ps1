@@ -11,6 +11,13 @@
     machine, and opens port 22 to 100.64.0.0/10 the way install-agent.ps1 opens 47800 -
     the tailnet is the security boundary, so the port must never face the LAN.
 
+    That component is a Feature on Demand, fetched from Windows Update rather than from the
+    installation media, and on a node whose updates are pointed at a WSUS server that does
+    not carry it the install fails with REGDB_E_CLASSNOTREG after a long silent wait. Seen
+    on a live node. When that happens the script falls back to the upstream MSI, which needs
+    nothing from Windows Update - see Install-FromRelease for why that is a fallback and not
+    the default.
+
     Authentication is by public key. A password-authenticated SSH server on a mining rig
     is an invitation, and the operator console already reaches these nodes without one.
     Pass -PublicKey (or set $env:XMRIG_FLEET_SSH_KEY) and the key is installed for
@@ -64,19 +71,89 @@ if ([string]::IsNullOrWhiteSpace($PublicKey) -and -not $AllowPasswordAuth) {
 
 # ---------------------------------------------------------------- install the feature
 
-$capability = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' |
-    Sort-Object Name | Select-Object -First 1
-if (-not $capability) {
-    throw 'This Windows build does not offer the OpenSSH.Server capability. Install Win32-OpenSSH from github.com/PowerShell/Win32-OpenSSH instead.'
+<#
+.SYNOPSIS
+    Installs OpenSSH from the upstream release when the Windows component will not.
+
+.DESCRIPTION
+    Deliberately a fallback rather than the default. The component that ships with Windows
+    is serviced by Windows Update; a copy installed from a release is not, and somebody has
+    to remember it exists. But a node that cannot install the component is a node that can
+    only ever be diagnosed by sitting at it, which is the very thing this script exists to
+    avoid, so the fallback wins over having no shell at all.
+
+    Upstream tags every build "Preview" - it is their long-standing habit, not a warning
+    about this particular one - so a release is chosen by date and that label is ignored.
+#>
+function Install-FromRelease {
+    Write-Host '==> Installing OpenSSH from the upstream release instead'
+
+    $api = 'https://api.github.com/repos/PowerShell/Win32-OpenSSH/releases?per_page=10'
+    $releases = Invoke-RestMethod -Uri $api -Headers @{ 'User-Agent' = 'xmrig-fleet' }
+
+    $arch = if ([Environment]::Is64BitOperatingSystem) {
+        if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'ARM64' } else { 'Win64' }
+    } else { 'Win32' }
+
+    $asset = $releases |
+        Sort-Object { [datetime]$_.published_at } -Descending |
+        ForEach-Object { $_.assets } |
+        Where-Object { $_.name -like "OpenSSH-$arch-*.msi" } |
+        Select-Object -First 1
+
+    if (-not $asset) {
+        throw "No OpenSSH-$arch MSI in the last releases of PowerShell/Win32-OpenSSH. Install it by hand."
+    }
+
+    $msi = Join-Path $env:TEMP $asset.name
+    Write-Host "    downloading $($asset.name)"
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $msi -UseBasicParsing
+
+    # ADDLOCAL=Server: the client half is not wanted on a rig, and installing it would put
+    # a second ssh.exe ahead of the one Windows ships on PATH.
+    $run = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" ADDLOCAL=Server /qn /norestart" -Wait -PassThru
+    if ($run.ExitCode -ne 0) {
+        throw "msiexec failed with exit code $($run.ExitCode) installing $($asset.name)."
+    }
+
+    Remove-Item $msi -ErrorAction SilentlyContinue
+    Write-Host '    installed'
 }
 
-if ($capability.State -eq 'Installed') {
-    Write-Host "==> $($capability.Name) already installed"
-} else {
-    # Pulled from Windows Update as a Feature on Demand, so the node needs internet.
-    Write-Host "==> Installing $($capability.Name)"
-    Add-WindowsCapability -Online -Name $capability.Name | Out-Null
-    Write-Host '    installed'
+# The MSI below registers sshd too, so an sshd that already exists is the end of this
+# step whichever way it got there. Checked before the capability, because a node
+# installed from the MSI reports the capability as absent and would be sent round the
+# loop that failed in the first place.
+if (Get-Service -Name sshd -ErrorAction SilentlyContinue) {
+    Write-Host '==> sshd is already installed on this node'
+}
+else {
+    $capability = Get-WindowsCapability -Online -Name 'OpenSSH.Server*' |
+        Sort-Object Name | Select-Object -First 1
+
+    if ($capability -and $capability.State -eq 'Installed') {
+        Write-Host "==> $($capability.Name) already installed"
+    }
+    elseif ($capability) {
+        # A Feature on Demand, so it is fetched from Windows Update rather than from the
+        # installation media. That makes this the one step on a mining node that depends on
+        # Windows Update working, and on some nodes it does not: a WSUS policy points the
+        # search at a server that does not carry the package, and the call fails with
+        # REGDB_E_CLASSNOTREG (0x80040154) after a long silent wait. Observed on a live node.
+        Write-Host "==> Installing $($capability.Name)"
+        try {
+            Add-WindowsCapability -Online -Name $capability.Name | Out-Null
+            Write-Host '    installed'
+        }
+        catch {
+            Write-Host "    the Windows component would not install: $($_.Exception.Message)" -ForegroundColor Yellow
+            Install-FromRelease
+        }
+    }
+    else {
+        Write-Host '==> This Windows build does not offer the OpenSSH.Server component' -ForegroundColor Yellow
+        Install-FromRelease
+    }
 }
 
 # ----------------------------------------------------------------------- the services
