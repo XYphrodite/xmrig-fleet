@@ -55,8 +55,9 @@ Pool: Hashvault. This is the fleet's main and only reliably profitable activity.
 
 ### RTX 4060 8 GB — `mks68i7rtx`
 
-Miner: lolMiner 1.98a unless noted. Shares GPU with Ollama; a watchdog stops mining while the
-model is in use.
+Miner: lolMiner 1.98a unless noted. Shares the card with Ollama; mining stands down while the
+model is in use. Driven by the fleet agent since 2026-09-04 — every figure above that date was
+taken under a hand-built scheduled task instead, which is worth knowing when comparing.
 
 | Algorithm | Pool | Rate | Income | Temp / fan | Verdict |
 |-----------|------|-----:|-------:|-----------|---------|
@@ -157,7 +158,12 @@ These cost hours to find and will cost them again if forgotten.
 
 ### GPU/model coexistence on `mks68i7rtx`
 
-`C:\mining\gpu-guard.ps1`, scheduled task `xmrig-fleet-gpu-guard`, runs as SYSTEM.
+**Now the agent's job.** `GpuPauseService` in agent 1.10.1 replaced the hand-built
+`gpu-guard.ps1`; the scheduled tasks `xmrig-fleet-gpu` and `xmrig-fleet-gpu-guard` are disabled
+on that node as of 2026-09-04. The rule is the same one, generalised: it watches a TCP port or a
+process name rather than Ollama specifically, because a game and a render want the card for the
+same reason. Settings live in `fleet.json`, the node keeps them in `miner.json`, and the decision
+is visible in `/gpu` as a notice rather than only in a log nobody opens.
 
 Stops mining while any connection is open to Ollama's port, resumes after **300 s** of quiet. The
 trigger is a connection, not a resident model: a model stays in VRAM for over twenty minutes after
@@ -173,6 +179,40 @@ Duty cycle measured over one hour of ordinary use: **90% mining**. Over a subseq
 eleven hours. The feared 33% did not materialise, but both figures say more about how the model was
 used that day than about the watchdog. Duty cycle must be read from `earn2.csv` over a working day
 before it means anything.
+
+### The session-0 story was wrong (2026-09-04)
+
+The card was mined from a scheduled task with `LogonType Interactive` because `lolMiner` was
+believed not to work under a service in session 0. It does. `lolMiner --list-devices` run from an
+SSH shell — which on Windows is session 0 — enumerates the RTX 4060 through CUDA with no
+complaint, and the agent, a service in the same session, has since started and run the miner
+there. What actually fails on that node is PowerShell under Task Scheduler, with `0xC0000005`;
+the two were conflated.
+
+The same exception code turns up in a third place on that machine: Ollama's `llama-server`
+terminates with `0xc0000005` on **every** request, including a 137 MB embedding model with the
+card free and mining stopped. `/api/tags` and `/api/version` keep answering while it does, so an
+API ping is not a health check here. Whether one fault explains all three is unknown.
+
+### What the agent measured on the first day it owned the miner
+
+| | |
+|---|---|
+| Started by the agent in session 0 | pid 19400, then 18544 after a service restart |
+| Stand-down on a request to port 11434 | immediate — the next 1 s tick |
+| Notice shown while paused | `paused, 295s of quiet still needed`, counting down |
+| Resume | 16:43:33, after the full 300 s, at 4.27 g/s |
+| Autostart across an agent restart | `GPU autostart: GPU miner started on CR29, pid 18544` |
+
+Rate readings across the changeover: 3.32-4.27 g/s, against 4.42 g/s from the scheduled task just
+before it. **Not yet a fair comparison.** lolMiner reports `Total_Performance` as a session average,
+and this miner was restarted three times in half an hour while the pause, resume and autostart
+paths were each exercised, so every reading is an average dominated by its own warm-up. A settled
+figure needs an undisturbed hour; the task figure had 9 h 25 min behind it.
+
+Shares: 4 accepted, 0 stale, 0 rejected in the first twenty-five minutes — the 18% staleness that a
+scheduled task's default priority once caused did not return, which is what `GpuMinerService`
+setting `ProcessPriorityClass.Normal` explicitly is there to prevent.
 
 ---
 
@@ -237,7 +277,13 @@ one currently in use (24 ms latency).
 300 s was chosen deliberately, and one hour of observation showed 90% duty. But that hour was quiet.
 
 **Test**: let `earn2.csv` accumulate a full 24 h, compute the real duty cycle from the `up` column,
-then decide whether 90 s would recover meaningful time.
+then decide whether 90 s would recover meaningful time. The cooldown now lives in `fleet.json` as
+`gpuMiner.pauseWhile.quietSeconds`, so changing it is a push rather than an edit on the node.
+
+**Also settle the hashrate.** Every rate above for the agent-driven miner is a session average taken
+within half an hour of the changeover, while the miner was being restarted to test each path. Leave
+it alone for an hour and read it once, so the move off the scheduled task can be shown to cost
+nothing — or shown to cost something.
 
 ### 6. Power limit versus heat
 
