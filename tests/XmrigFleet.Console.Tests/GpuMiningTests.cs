@@ -188,4 +188,62 @@ public class GpuMiningTests
         Assert.False(rule.Paused);
         Assert.Equal("no pause rule", rule.Reason);
     }
+
+    /// <summary>
+    /// The card comes back after a reboot, which is what makes the agent a real replacement for a
+    /// scheduled task with a boot trigger. There is no separate autostart setting: `Enabled` is
+    /// already the answer, and the agent reads it back out of the node's own miner.json.
+    /// </summary>
+    [Fact]
+    public void An_enabled_card_is_still_enabled_after_the_agent_restarts()
+    {
+        using var dir = new TempDirectory();
+
+        Store(dir).Update(new MinerConfigDto
+        {
+            GpuMiner = new GpuMinerSettingsDto
+            {
+                Enabled = true,
+                Algorithm = "CR29",
+                PoolUrl = "xtm-c29.kryptex.network:7040",
+                User = "address/worker",
+                ApiPort = 21556,
+            },
+        });
+
+        // A second store over the same directory is what the next agent process sees.
+        var afterRestart = Store(dir).Current;
+
+        Assert.True(afterRestart.GpuMiner!.Enabled);
+        Assert.Equal("CR29", afterRestart.GpuMiner.Algorithm);
+        Assert.Equal(21556, afterRestart.GpuMiner.ApiPort);
+    }
+
+    /// <summary>
+    /// A node that lost power while the card was paused must not come back owing a restart it has
+    /// already made. The flag means "this agent stopped the miner and will start it again"; once
+    /// the boot-time start has run, a later quiet tick would otherwise resume a miner nobody
+    /// paused — and, worse, one the operator may have stopped by hand since.
+    /// </summary>
+    [Fact]
+    public void A_boot_time_start_clears_the_debt_the_pause_flag_records()
+    {
+        using var dir = new TempDirectory();
+        var store = Store(dir);
+
+        store.Update(new MinerConfigDto
+        {
+            GpuMiner = new GpuMinerSettingsDto { Enabled = true },
+            GpuStoppedByPause = true,
+        });
+
+        Assert.True(Store(dir).Current.GpuStoppedByPause);
+
+        var cleared = store.Update(new MinerConfigDto { GpuStoppedByPause = false });
+
+        // False must be storable, not read as "nothing said" — the whole clearing path is a
+        // patch that names exactly one field and sets it to false.
+        Assert.False(cleared.GpuStoppedByPause);
+        Assert.True(cleared.GpuMiner!.Enabled);
+    }
 }
