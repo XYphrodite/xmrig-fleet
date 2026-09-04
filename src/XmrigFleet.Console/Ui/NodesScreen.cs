@@ -92,13 +92,21 @@ public sealed class NodesScreen
         }
 
         var known = _config.Nodes.Select(n => n.Host).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var selectable = machines.Where(m => !known.Contains(m.Address)).ToList();
+        var selectable = machines.Where(m => !known.Contains(m.Address) && !known.Contains(m.Host)).ToList();
         if (selectable.Count == 0)
         {
             AnsiConsole.MarkupLine("[green]Every tailnet machine is already in the fleet.[/]");
             UiHelpers.Pause();
             return;
         }
+
+        // Say which form is about to be stored: a MagicDNS name keeps working when a node's
+        // tailnet address changes, and the address is all that is left on a machine that does
+        // not resolve those names.
+        AnsiConsole.MarkupLine(selectable.Any(m => m.DnsName is not null)
+            ? "[grey]MagicDNS resolves here - nodes are added by name.[/]"
+            : "[grey]MagicDNS does not resolve here - nodes are added by address.[/]");
+        AnsiConsole.WriteLine();
 
         var picked = AnsiConsole.Prompt(new MultiSelectionPrompt<TailnetMachine>()
             .Title("Machines to add as mining nodes")
@@ -118,7 +126,7 @@ public sealed class NodesScreen
             _config.Nodes.Add(new NodeConfig
             {
                 Name = machine.Name,
-                Host = machine.Address,
+                Host = machine.Host,
                 Port = _config.AgentPort,
             });
         }
