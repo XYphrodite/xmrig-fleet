@@ -53,10 +53,10 @@ Hand-written source only; excludes `bin`/`obj`, generated files, and documentati
 
 | Language | Files | Code lines |
 |----------|------:|-----------:|
-| C# (agent + console + contracts) | 34 | 5,154 |
-| C# (tests) | 9 | 564 |
+| C# (agent + console + contracts) | 37 | 5,887 |
+| C# (tests) | 10 | 727 |
 | PowerShell (`deploy/`) | 5 | 606 |
-| **Total** | **48** | **6,324** |
+| **Total** | **52** | **7,220** |
 
 ---
 
@@ -93,6 +93,12 @@ API enabled, so hashrate never has to be scraped from stdout.
   |        v                                        |
   |   xmrig.exe --http-enabled  ---> the mining pool|
   |                                                 |
+  |   GpuMinerService ----- starts/stops lolMiner   |
+  |        |  loopback :47802                       |
+  |        v                                        |
+  |   lolMiner ------------> the GPU coin's own pool|
+  |   GpuPauseService ---- stands the card down     |
+  |                                                 |
   |   HardwareService --- LibreHardwareMonitor      |
   |   InstallerService -- GitHub release -> disk    |
   |   miner.json -------- pushed pool/wallet/path   |
@@ -123,6 +129,11 @@ API enabled, so hashrate never has to be scraped from stdout.
    one-shot command with a meaningful exit code, for Task Scheduler and cron.
 7. **Degrade, never crash.** Pool JSON is read field by field with tolerant fallbacks;
    a renamed field blanks one cell instead of breaking a screen.
+8. **A graphics card belongs to whoever is at the machine.** The CPU can be throttled down a
+   rung; a card cannot be shared at all, so GPU mining stands aside entirely and instantly when
+   something else wants it, and only comes back after a long quiet period. The rule names a port
+   or a process rather than an application, because a local model, a game and a render all want
+   the card for the same reason.
 
 ---
 
@@ -159,6 +170,9 @@ hardware.
 | `SystemLoadReader` | `GetSystemTimes` + `GlobalMemoryStatusEx`, with the miner's own CPU time subtracted |
 | `ThrottleLog` | `throttle.log` beside the binary: every rung change with the readings behind it |
 | `MinerConfigStore` | Durable per-node miner settings |
+| `GpuMinerService` | Start/stop/restart lolMiner, read its loopback API, keep the last 200 output lines. A separate class from `MinerService` on purpose: it runs at Normal priority (Task Scheduler's default of 7 cost 18% of shares to staleness), it never touches an `xmrig` process, and it settles for five seconds rather than 700 ms because a card that will not mine fails quietly |
+| `GpuPauseService` | Stands the card's miner down while a named port has a live connection or a named process runs, and brings it back after the quiet period. Reads the TCP table through `IPGlobalProperties` — `Get-NetTCPConnection` sees nothing from a service |
+| `GpuPauseRule` | The stand-down rule itself, pure and clock-injected, and the part the tests drive |
 
 ### 2. **XmrigFleet.Console**
 **Type**: Console application -> `xmrig-fleet.exe`
@@ -174,7 +188,7 @@ install/push/autostart/logs), `NodesScreen` (discover/add/edit/test), `HardwareS
 
 | Class | Responsibility |
 |-------|----------------|
-| `FleetService` | Parallel poll and parallel command fan-out, error normalisation |
+| `FleetService` | Parallel poll and parallel command fan-out, error normalisation; resolves the throttle and GPU settings each node should get before pushing them |
 | `AgentClient` | Typed HTTP client for one agent, long timeout for installs |
 | `MarketService` | Hashvault wallet/pool parsing, atomic-unit scaling, price, 30s cache |
 | `Economics` | Electricity cost, expected income, per-node profit split |
@@ -188,7 +202,8 @@ install/push/autostart/logs), `NodesScreen` (discover/add/edit/test), `HardwareS
 **Location**: `src/XmrigFleet.Contracts/`
 **Purpose**: The wire contract shared by both sides — `NodeSnapshotDto`,
 `MinerStatusDto`, `HardwareDto`, `MinerConfigDto`, `InstallRequestDto`,
-`CommandResultDto`, plus `ApiVersion.Current` so the console can warn on a mismatch.
+`CommandResultDto`, `GpuMinerSettingsDto`, `GpuMinerStatusDto`, `GpuPauseRuleDto`, plus
+`ApiVersion.Current` so the console can warn on a mismatch.
 
 ### 4. **XmrigFleet.Console.Tests**
 **Type**: xUnit test project
@@ -205,6 +220,7 @@ chasing coverage.
 | `UpdateAssetTests` | `update` matches the console asset and never the agent one that sits beside it in the same release |
 | `TailnetDiscoveryTests` | Discovery stores the MagicDNS name only when it resolves here, falls back to the address when it does not or when the tailnet has MagicDNS off, and skips a machine with no tailnet address |
 | `AutoStartTests` | An autostart push keeps the tuned ladder and the rest of the node's config; the setting survives an agent restart; the node's own answer beats the installed default while an untold node still follows it; autostart does not restart a miner the throttle stopped; and "unset" reads differently from "off" |
+| `GpuMiningTests` | A push that turns the card on keeps the lolMiner path and the session flag the node already knew; a pause rule naming a port replaces one naming a process rather than merging into a rule matching both; a node override replaces only what it names; and the stand-down is immediate while the return waits out the quiet period, restarted by any interruption |
 
 `AnsiConsole.Console` is a global that the markup tests swap, so
 [AssemblyInfo.cs](tests/XmrigFleet.Console.Tests/AssemblyInfo.cs) disables parallel runs.
@@ -218,7 +234,7 @@ All routes live under `/api/v1` and require the `X-Fleet-Token` header.
 | Method | Route | Purpose |
 |--------|-------|---------|
 | `GET` | `/info` | Hostname, OS, agent version, API version, uptime, elevation |
-| `GET` | `/status` | `NodeSnapshotDto` — info + miner + hardware in one call |
+| `GET` | `/status` | `NodeSnapshotDto` — info, miner, GPU miner and hardware in one call |
 | `GET` | `/miner` | Miner status only |
 | `POST` | `/miner/start` | Start XMRig with the stored config |
 | `POST` | `/miner/stop` | Stop **all** XMRig processes on the node |
@@ -229,6 +245,11 @@ All routes live under `/api/v1` and require the `X-Fleet-Token` header.
 | `GET` | `/logs` | Last 200 captured output lines |
 | `GET` | `/throttle` | Current power rung, the reason for it, and the load behind it |
 | `GET` | `/throttle/log` | The node's own record of every rung change and its readings |
+| `GET` | `/gpu` | What the graphics card is mining, its shares and its per-device readings |
+| `POST` | `/gpu/start` | Start lolMiner with the stored GPU config |
+| `POST` | `/gpu/stop` | Stop **all** lolMiner processes on the node; XMRig is untouched |
+| `POST` | `/gpu/restart` | Stop, settle, start |
+| `GET` | `/gpu/logs` | Last 200 captured lolMiner output lines |
 | `POST` | `/agent/update` | Update the agent itself and restart into the new build |
 
 ---
@@ -260,12 +281,19 @@ All routes live under `/api/v1` and require the `X-Fleet-Token` header.
       { "otherCpuPercent": 70, "level": 0 }
     ]
   },
+  "gpuMiner": {
+    "enabled": false,
+    "pauseWhile": { "tcpPort": 11434, "quietSeconds": 300 }
+  },
   "nodes": [
     { "name": "rig-1", "host": "100.100.10.11", "port": 47800,
       "enabled": true, "powerFallbackWatts": 220 },
     { "name": "rig-2", "host": "100.100.10.12", "port": 47800,
       "enabled": true, "powerFallbackWatts": 310, "pricePerKwh": 7.2,
-      "throttle": { "enabled": true, "floorLevel": 25 } }
+      "throttle": { "enabled": true, "floorLevel": 25 },
+      "gpuMinerPath": "C:\\mining\\lolMiner",
+      "gpuMiner": { "enabled": true, "algorithm": "CR29",
+                    "poolUrl": "pool.example.com:4444", "user": "address.worker" } }
   ]
 }
 ```
@@ -279,6 +307,19 @@ The `throttle` block is fleet-wide; a node's own block overrides only the fields
 the console resolves the two before pushing the result to that node. The ladder is read against
 CPU used by **everything except the miner** — reading total load would make capping the miner
 lower the very figure the cap responds to, and the machine would oscillate instead of settling.
+
+`gpuMiner` resolves the same way, and the override matters more here than it does for the
+throttle: the algorithm belongs to the card. An RTX 4060 earns on Cuckaroo29; a 4 GB RX 6500 XT
+answers `Unsupported device` to the same request, so a fleet-wide algorithm is only ever half an
+answer. `user` is stored whole, exactly as the pool wants it — `XMR:address.worker` for
+unMineable, `address/worker` for Kryptex — because no two pools agree on the shape and a console
+that assembled it would be wrong somewhere.
+
+`pauseWhile` names a **port or a process**, not an application. A local model, a game and a render
+all want the card for the same reason, and the miner has no business telling them apart. Standing
+down is immediate; coming back waits out `quietSeconds`, which defaults to five minutes because a
+model stays resident in VRAM between requests and a miner returning after ten seconds evicts it —
+the next question then waits for a reload instead of being answered.
 
 ### Agent — `appsettings.json`
 
@@ -363,6 +404,7 @@ xmrig-fleet update [--check]    # --check reports and exits 1 without installing
 xmrig-fleet upgrade-agents [node ...] [--version=v1.5.0] [--force]
 xmrig-fleet throttle [node ...] [--sync|--set=N|--auto] [--log]
 xmrig-fleet autostart [node ...] [--on|--off]
+xmrig-fleet gpu [node ...] [--sync|--start|--stop]
 xmrig-fleet version
 ```
 
@@ -392,6 +434,9 @@ xmrig-fleet/
 │   │   ├── MinerService.cs        # XMRig process control + loopback API reader
 │   │   ├── HardwareService.cs     # sensors, power estimate, PawnIO diagnostics
 │   │   ├── InstallerService.cs    # GitHub release -> unpack -> repoint config
+│   │   ├── GpuMinerService.cs     # lolMiner process control + its loopback API
+│   │   ├── GpuPauseService.cs     # hands the card back while somebody needs it
+│   │   ├── GpuPauseRule.cs        # the stand-down rule itself, pure and clock-injected
 │   │   └── AgentOptions.cs        # options + miner.json store
 │   ├── XmrigFleet.Console/        # operator console -> xmrig-fleet.exe
 │   │   ├── Ui/                    # Dashboard, Miner, Nodes, Hardware, Economics, Pool, Settings
@@ -478,6 +523,21 @@ xmrig-fleet/
       `tecno-camon-20`, so the name is read from `DNSName` and never built from `HostName`
 
 ### Implemented, Not Yet Verified Live ⏳
+- [ ] **GPU mining as a fleet feature.** The mining itself is verified — an RTX 4060 has been on
+      Cuckaroo29 for days at ~4.5 g/s, and the numbers are in
+      [MiningMeasurements.md](MiningMeasurements.md) — but by hand-built scheduled tasks on the
+      node, not through this code. What is new here is the agent owning that miner the way it owns
+      XMRig: `/gpu`, `/gpu/start`, `/gpu/stop`, `/gpu/restart`, `/gpu/logs`, the card's state
+      inside `/status`, settings resolved on the operator's machine and pushed, two dashboard
+      columns and `xmrig-fleet gpu`. Built and unit-tested; no node has been driven through it yet
+- [ ] **Handing the card back on demand.** `GpuPauseService` stands the miner down while a named
+      TCP port has a live connection or a named process is running, and resumes after a quiet
+      period. Generalised deliberately: a local model, a game and a render all want the card for
+      the same reason, so the rule names a port or a process rather than an application. The
+      behaviour is proven — a hand-written guard on `mks68i7rtx` has been doing exactly this for
+      Ollama on 11434 with a five-minute quiet period — but by a PowerShell script, not by the
+      agent. Note the TCP table is read through `IPGlobalProperties`, because
+      `Get-NetTCPConnection` returns nothing from a service context; that was measured, not assumed
 - [ ] **Autostart from the console.** Whether a node mines as soon as its agent starts is now a
       pushed per-node setting rather than a hand edit to `appsettings.json` on the machine, with
       **Miner control → Start mining when the node boots** and `xmrig-fleet autostart` as its
@@ -515,6 +575,13 @@ xmrig-fleet/
 - [ ] Whether installing PawnIO actually restores CPU temperature and package power
 
 ### Planned 📋
+- [ ] **Finish GPU mining out of the CLI.** Four pieces, in the order they hurt: an interactive
+      session launcher (without it one node cannot be driven from the console at all), a
+      `GpuInstallerService` so lolMiner arrives the way XMRig does, a `GpuScreen` in the TUI, and a
+      per-node record of every pause and resume the way `throttle.log` records rungs
+- [ ] **Pool adapters for what a card actually earns.** Kryptex and unMineable both publish a
+      balance API. Until they are read, the card's electricity is charged and its income is not,
+      which makes Economics read worse than the truth
 - [ ] **Bring CPU temperature and package power online**: install PawnIO on one node,
       confirm the sensors appear, then roll it out fleet-wide and drop the
       `powerFallbackWatts` workaround where real readings exist
@@ -531,6 +598,22 @@ xmrig-fleet/
       runs over names — what has been checked live is `/info`, not a full `status` fan-out
 
 ### Known Issues / Risks ⚠️
+- **GPU mining cannot yet start in a node's logged-on session, and on one node that is the only
+  place it works.** `lolMiner` stalls in session 0 on `mks68i7rtx` and runs normally from an
+  interactive task, which is how that card is mining today. `GpuMinerService` therefore refuses
+  `RunInInteractiveSession` with a message saying so rather than reporting a start that never
+  happens. Closing it means lifting the `CreateProcessAsUser` machinery out of
+  `SessionMonitorService`, where it is private, entangled with monitor adoption, and worth ~60% of
+  that node's CPU hashrate if broken. It also needs a fix that path does not currently need:
+  `lpCommandLine` is passed as null today, and `CreateProcessW` writes into that buffer, so a
+  managed string handed straight to it corrupts interned memory.
+- **lolMiner is installed by hand.** `gpuMinerPath` records where it went; there is no
+  `/gpu/install` to match the CPU miner's. A node whose path is wrong reports a clear failure
+  rather than mining nothing quietly, but somebody still has to walk the file over.
+- **A card's earnings are not in Economics.** The electricity a mining card burns is measured and
+  charged like any other draw, but the income side reads Hashvault, which knows only Monero. A
+  fleet with GPU mining on therefore shows its cost and not its revenue. Measured figures live in
+  [MiningMeasurements.md](MiningMeasurements.md) until pool adapters exist.
 - **A hidden monitor window makes that monitor unopenable for the person at the machine.** Task
   Manager is single-instance per session, so a hidden instance does not sit quietly beside a new
   one - it swallows it. Measured with nothing running to begin with: starting one hidden gives one
@@ -628,9 +711,9 @@ xmrig-fleet/
 
 ## Document Information
 
-**Document Version**: v1.1
+**Document Version**: v1.2
 **Last Updated**: 2026-09-04
-**Product Version**: 1.9.5
+**Product Version**: 1.10.0
 **Status**: Active
 **Repository**: `c:\Repos\xmrig-fleet` (branch `master`), published at
 [github.com/XYphrodite/xmrig-fleet](https://github.com/XYphrodite/xmrig-fleet)
