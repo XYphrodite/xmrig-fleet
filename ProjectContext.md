@@ -53,10 +53,10 @@ Hand-written source only; excludes `bin`/`obj`, generated files, and documentati
 
 | Language | Files | Code lines |
 |----------|------:|-----------:|
-| C# (agent + console + contracts) | 34 | 4,848 |
-| C# (tests) | 6 | 383 |
-| PowerShell (`deploy/`) | 4 | 332 |
-| **Total** | **44** | **5,563** |
+| C# (agent + console + contracts) | 34 | 5,154 |
+| C# (tests) | 9 | 564 |
+| PowerShell (`deploy/`) | 5 | 606 |
+| **Total** | **48** | **6,324** |
 
 ---
 
@@ -167,7 +167,7 @@ hardware.
 unattended use.
 
 **Screens** (`Ui/`): `Dashboard` (live table + totals), `MinerScreen` (start/stop/
-install/push/logs), `NodesScreen` (discover/add/edit/test), `HardwareScreen`,
+install/push/autostart/logs), `NodesScreen` (discover/add/edit/test), `HardwareScreen`,
 `EconomicsScreen`, `PoolScreen`, `SettingsScreen`.
 
 **Supporting services**:
@@ -178,7 +178,7 @@ install/push/logs), `NodesScreen` (discover/add/edit/test), `HardwareScreen`,
 | `AgentClient` | Typed HTTP client for one agent, long timeout for installs |
 | `MarketService` | Hashvault wallet/pool parsing, atomic-unit scaling, price, 30s cache |
 | `Economics` | Electricity cost, expected income, per-node profit split |
-| `TailscaleService` | Parses `tailscale status --json` for node discovery |
+| `TailscaleService` | Parses `tailscale status --json` for node discovery, storing the MagicDNS name rather than the address when this machine resolves it |
 | `FleetConfig` | `fleet.json` load/save (override with `XMRIG_FLEET_CONFIG`) |
 | `UpdateService` | GitHub release lookup, streaming download, in-place file swap |
 | `Updater` | The `update` command, its progress bar, and the start-up "newer version" notice |
@@ -203,6 +203,8 @@ chasing coverage.
 | `MarkupSafetyTests` | Prompts and badges render data holding `[` — the crash that reached the operator twice. Drives real prompts through `Spectre.Console.Testing`, and asserts escaping never reaches the stored value |
 | `EconomicsTests` | Per-node tariffs summed separately, the income formula, idle nodes not charged, measured power beating the configured fallback |
 | `UpdateAssetTests` | `update` matches the console asset and never the agent one that sits beside it in the same release |
+| `TailnetDiscoveryTests` | Discovery stores the MagicDNS name only when it resolves here, falls back to the address when it does not or when the tailnet has MagicDNS off, and skips a machine with no tailnet address |
+| `AutoStartTests` | An autostart push keeps the tuned ladder and the rest of the node's config; the setting survives an agent restart; the node's own answer beats the installed default while an untold node still follows it; autostart does not restart a miner the throttle stopped; and "unset" reads differently from "off" |
 
 `AnsiConsole.Console` is a global that the markup tests swap, so
 [AssemblyInfo.cs](tests/XmrigFleet.Console.Tests/AssemblyInfo.cs) disables parallel runs.
@@ -268,6 +270,11 @@ All routes live under `/api/v1` and require the `X-Fleet-Token` header.
 }
 ```
 
+A node's `host` is put into the URL as it stands, so it can equally be a MagicDNS name
+(`rig-1.tailnet-name.ts.net`), which is what discovery stores when the operator's machine
+resolves those names. A name survives a node's address changing; an address survives the
+operator's resolver not being Tailscale's, which is why discovery checks before choosing.
+
 The `throttle` block is fleet-wide; a node's own block overrides only the fields it names, and
 the console resolves the two before pushing the result to that node. The ladder is read against
 CPU used by **everything except the miner** — reading total load would make capping the miner
@@ -285,6 +292,14 @@ lower the very figure the cap responds to, and the machine would oscillate inste
   }
 }
 ```
+
+`AutoStartMiner` here is only the installed default. Once an operator sets autostart from the
+console — **Miner control → Start mining when the node boots**, or `xmrig-fleet autostart --on` —
+the answer lives in that node's `miner.json` and this value stops being consulted. The setting
+belongs in the console because it decides whether a node that came back on its own returns to
+work or sits idle until somebody notices, and that is a fleet-wide judgement, not an install-time
+one. A node the throttle stopped is left down either way: autostart exists so a rebooted rig
+resumes, not so a machine somebody is using starts mining under them.
 
 ⚠️ **Both files hold secrets** (fleet token, wallet address). They are listed in
 [.gitignore](.gitignore) and must stay out of version control.
@@ -347,6 +362,7 @@ xmrig-fleet pool
 xmrig-fleet update [--check]    # --check reports and exits 1 without installing
 xmrig-fleet upgrade-agents [node ...] [--version=v1.5.0] [--force]
 xmrig-fleet throttle [node ...] [--sync|--set=N|--auto] [--log]
+xmrig-fleet autostart [node ...] [--on|--off]
 xmrig-fleet version
 ```
 
@@ -454,8 +470,22 @@ xmrig-fleet/
       "adopted the Task Manager already open in session 2 as pid 13848" and `desktop-ib88isg`
       "Task Manager already running as pid 27228". Before this the console printed "session
       monitor on" whatever the node had done
+- [x] Discovery by MagicDNS name, run against the live tailnet: all eight machines came back
+      with their `.ts.net` name and the resolution probe kept it. The agent answers on the
+      stored form — `http://mks68i7rtx.tail08a9a5.ts.net:47800/api/v1/info` returned `401` from
+      `100.105.87.52`. Names also survive a hostname a DNS label cannot hold: that tailnet has
+      a `moscow_enjoyer` and a `TECNO CAMON 20`, whose labels are `moscow-enjoyer` and
+      `tecno-camon-20`, so the name is read from `DNSName` and never built from `HostName`
 
 ### Implemented, Not Yet Verified Live ⏳
+- [ ] **Autostart from the console.** Whether a node mines as soon as its agent starts is now a
+      pushed per-node setting rather than a hand edit to `appsettings.json` on the machine, with
+      **Miner control → Start mining when the node boots** and `xmrig-fleet autostart` as its
+      scriptable twin. Prompted by `desktop-ib88isg`: it lost mains power four times in ten days
+      and bugchecked twice, came back on its own every time, and mined nothing afterwards because
+      the flag was off and nobody was there to notice. Both sides read the setting back from the
+      node rather than echoing the request, so an agent too old to know the field says so instead
+      of reporting success. Unit-tested and built; no node has been rebooted to watch it work
 - [ ] **Adaptive power limit.** Five rungs (100/75/50/25/0) chosen from the CPU load of everything
       except the miner. A rung is a share of the **miner's own full speed**, not of the machine:
       six mining threads on twelve logical CPUs want about half the machine, so a job object told
@@ -494,6 +524,11 @@ xmrig-fleet/
 - [ ] Alerting: node offline, miner dead, temperature over threshold
 - [ ] Per-node XMRig config templates (thread pinning, huge pages, MSR flags)
 - [ ] Automatic miner restart when a node reports zero hashrate while mining
+- [ ] **Move the nodes already in `fleet.json` onto their MagicDNS names.** Discovery stores a
+      name now, but only for machines it adds: a fleet built before that still polls by address,
+      and the only way across is **Nodes → Edit node**, one node at a time. Offer the swap during
+      discovery for machines already known, or as a one-shot command, and confirm a whole poll
+      runs over names — what has been checked live is `/info`, not a full `status` fan-out
 
 ### Known Issues / Risks ⚠️
 - **A hidden monitor window makes that monitor unopenable for the person at the machine.** Task
@@ -594,7 +629,7 @@ xmrig-fleet/
 ## Document Information
 
 **Document Version**: v1.1
-**Last Updated**: 2026-09-01
+**Last Updated**: 2026-09-04
 **Product Version**: 1.9.5
 **Status**: Active
 **Repository**: `c:\Repos\xmrig-fleet` (branch `master`), published at
