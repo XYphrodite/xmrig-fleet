@@ -210,7 +210,12 @@ and this miner was restarted three times in half an hour while the pause, resume
 paths were each exercised, so every reading is an average dominated by its own warm-up. A settled
 figure needs an undisturbed hour; the task figure had 9 h 25 min behind it.
 
-Shares: 4 accepted, 0 stale, 0 rejected in the first twenty-five minutes — the 18% staleness that a
+The shape of the readings supports that reading rather than a real loss. Left alone after the last
+restart, the reported average climbed monotonically — 3.90 g/s at 16:55, 4.03 at 17:04, 4.09 at
+17:06, 4.15 at 17:07 — which is what a session average does while it warms up, and not what a
+miner held back by something does.
+
+Shares: 8 accepted, 0 stale, 1 rejected in the first forty minutes — the 18% staleness that a
 scheduled task's default priority once caused did not return, which is what `GpuMinerService`
 setting `ProcessPriorityClass.Normal` explicitly is there to prevent.
 
