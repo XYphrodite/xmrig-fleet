@@ -75,6 +75,11 @@ public sealed class Dashboard
     private IRenderable Compose(IReadOnlyList<NodeState> states, FleetEconomics economics)
     {
         var money = _money ?? MoneyFormat.Single(economics.Currency);
+
+        // Twelve columns already wrap an 80-column terminal, so the GPU pair only appears when
+        // some node in the fleet actually has a card mining. A fleet with none loses nothing.
+        var showGpu = states.Any(s => s.Gpu is not null);
+
         var table = new Table()
             .Border(TableBorder.Rounded)
             .BorderColor(Color.Grey35)
@@ -89,15 +94,24 @@ public sealed class Dashboard
             .AddColumn(new TableColumn("CPU").RightAligned())
             .AddColumn(new TableColumn("Temp").RightAligned())
             .AddColumn(new TableColumn("Watts").RightAligned())
-            .AddColumn(new TableColumn("Shares").RightAligned())
-            .AddColumn(new TableColumn("Uptime").RightAligned());
+            .AddColumn(new TableColumn("Shares").RightAligned());
+
+        if (showGpu)
+        {
+            table
+                .AddColumn(new TableColumn("GPU").RightAligned())
+                .AddColumn(new TableColumn("GPU sh").RightAligned());
+        }
+
+        table.AddColumn(new TableColumn("Uptime").RightAligned());
 
         foreach (var state in states.OrderBy(s => s.Node.Name, StringComparer.OrdinalIgnoreCase))
         {
             var miner = state.Snapshot?.Miner;
             var hardware = state.Snapshot?.Hardware;
 
-            table.AddRow(
+            var cells = new List<IRenderable>
+            {
                 new Markup($"[bold]{UiHelpers.Escape(state.Node.Name)}[/]\n[grey]{UiHelpers.Escape(state.Node.Host)}[/]"),
                 new Markup(UiHelpers.StatusBadge(state)),
                 new Markup(state.Hashrate > 0 ? $"[aqua]{Economics.FormatHashrate(state.Hashrate)}[/]" : "[grey]-[/]"),
@@ -113,7 +127,16 @@ public sealed class Dashboard
                 new Markup(miner is { SharesTotal: > 0 }
                     ? $"{miner.SharesGood}/{miner.SharesTotal}"
                     : "[grey]-[/]"),
-                new Markup(miner is { Running: true } ? Economics.FormatDuration(miner.UptimeSeconds) : "[grey]-[/]"));
+            };
+
+            if (showGpu)
+            {
+                cells.Add(new Markup(UiHelpers.GpuBadge(state.Gpu)));
+                cells.Add(new Markup(UiHelpers.GpuShares(state.Gpu)));
+            }
+
+            cells.Add(new Markup(miner is { Running: true } ? Economics.FormatDuration(miner.UptimeSeconds) : "[grey]-[/]"));
+            table.AddRow(cells);
         }
 
         var online = states.Count(s => s.Online);

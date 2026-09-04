@@ -33,6 +33,12 @@ public sealed class FleetConfig
     /// <summary>Fleet-wide throttle rules. Individual nodes override parts of this.</summary>
     public ThrottleConfig Throttle { get; set; } = new();
 
+    /// <summary>
+    /// Fleet-wide GPU mining defaults. Mostly a place to keep the pause rule and the pool login;
+    /// the algorithm usually belongs on the node, because it is a property of the card.
+    /// </summary>
+    public GpuMinerConfig GpuMiner { get; set; } = new();
+
     public List<NodeConfig> Nodes { get; set; } = [];
 
     [JsonIgnore]
@@ -121,6 +127,106 @@ public sealed class FleetConfig
             RampUpSeconds = own?.RampUpSeconds ?? Throttle.RampUpSeconds,
         };
     }
+
+    /// <summary>
+    /// What a node's graphics card should mine: the fleet's answer with that node's exceptions
+    /// laid over it, resolved here for the same reason <see cref="ThrottleFor"/> is.
+    ///
+    /// The per-node half carries more weight here than it does for the throttle, because the
+    /// algorithm belongs to the card rather than to the fleet. A fleet-wide "mine Tari" is
+    /// meaningless on a 4 GB card that cannot run Cuckaroo29 at all.
+    /// </summary>
+    public GpuMinerSettingsDto GpuMinerFor(NodeConfig node)
+    {
+        var own = node.GpuMiner;
+
+        return new GpuMinerSettingsDto
+        {
+            Enabled = own?.Enabled ?? GpuMiner.Enabled,
+            Algorithm = own?.Algorithm ?? GpuMiner.Algorithm,
+            PoolUrl = own?.PoolUrl ?? GpuMiner.PoolUrl,
+            User = own?.User ?? GpuMiner.User,
+            Password = own?.Password ?? GpuMiner.Password ?? "x",
+            ApiPort = own?.ApiPort ?? GpuMiner.ApiPort ?? DefaultGpuApiPort,
+            RunInInteractiveSession = own?.RunInInteractiveSession ?? GpuMiner.RunInInteractiveSession,
+            PauseWhile = PauseRuleFor(own?.PauseWhile ?? GpuMiner.PauseWhile),
+        };
+    }
+
+    /// <summary>
+    /// lolMiner's loopback API port when nobody has chosen one. One above the xmrig API's 47801,
+    /// so the two miners cannot collide on a node running both.
+    /// </summary>
+    public const int DefaultGpuApiPort = 47802;
+
+    /// <summary>
+    /// Converts a pause rule, or returns null when the rule names no condition — a block with only
+    /// a quiet time in it would stand a node down forever with nothing to wake it.
+    /// </summary>
+    private static GpuPauseRuleDto? PauseRuleFor(GpuPauseConfig? rule)
+    {
+        if (rule is null || (rule.TcpPort is null && string.IsNullOrWhiteSpace(rule.ProcessName)))
+            return null;
+
+        return new GpuPauseRuleDto
+        {
+            TcpPort = rule.TcpPort,
+            ProcessName = string.IsNullOrWhiteSpace(rule.ProcessName) ? null : rule.ProcessName,
+            QuietSeconds = rule.QuietSeconds,
+        };
+    }
+}
+
+/// <summary>
+/// What a graphics card mines. Every field is nullable at node level so one rig can name a
+/// different algorithm without restating the pool, the login or the pause rule.
+/// </summary>
+public sealed class GpuMinerConfig
+{
+    /// <summary>Off unless asked for, like the throttle and for the same reason.</summary>
+    public bool? Enabled { get; set; }
+
+    /// <summary>lolMiner's algorithm name, e.g. <c>CR29</c> or <c>NEXA</c>.</summary>
+    public string? Algorithm { get; set; }
+
+    /// <summary>host:port of the pool.</summary>
+    public string? PoolUrl { get; set; }
+
+    /// <summary>
+    /// The pool login exactly as that pool wants it — <c>XMR:address.worker</c> for unMineable,
+    /// <c>address/worker</c> for Kryptex. Written whole because no two pools agree on the shape.
+    /// </summary>
+    public string? User { get; set; }
+
+    public string? Password { get; set; }
+
+    /// <summary>Loopback port for lolMiner's API. Null uses <see cref="FleetConfig.DefaultGpuApiPort"/>.</summary>
+    public int? ApiPort { get; set; }
+
+    /// <summary>
+    /// Start the miner in the node's logged-on session rather than the agent's session 0. Needed
+    /// on some machines and not others; see <see cref="GpuMinerSettingsDto.RunInInteractiveSession"/>.
+    /// </summary>
+    public bool? RunInInteractiveSession { get; set; }
+
+    /// <summary>When the card should be handed back to whoever is using the machine.</summary>
+    public GpuPauseConfig? PauseWhile { get; set; }
+}
+
+/// <summary>
+/// When GPU mining stands down. Names a port or a process, not an application, because a local
+/// model, a game and a render all want the card for the same reason.
+/// </summary>
+public sealed class GpuPauseConfig
+{
+    /// <summary>Stand down while anything holds a connection to this local port, e.g. 11434 for Ollama.</summary>
+    public int? TcpPort { get; set; }
+
+    /// <summary>Stand down while a process of this name runs. No extension.</summary>
+    public string? ProcessName { get; set; }
+
+    /// <summary>Seconds of quiet before mining resumes. Standing down is immediate.</summary>
+    public int? QuietSeconds { get; set; }
 }
 
 /// <summary>
@@ -183,6 +289,16 @@ public sealed class NodeConfig
     /// headless one want different answers, and the Xeon's 16 GB wants a different one again.
     /// </summary>
     public ThrottleConfig? Throttle { get; set; }
+
+    /// <summary>
+    /// This machine's graphics card settings. Usually where the algorithm actually lives: an
+    /// RTX 4060 mines Cuckaroo29 and a 4 GB RX 6500 XT cannot, so the fleet default rarely fits
+    /// every card at once.
+    /// </summary>
+    public GpuMinerConfig? GpuMiner { get; set; }
+
+    /// <summary>Directory lolMiner lives in on that node, used to prefill the install prompt.</summary>
+    public string? GpuMinerPath { get; set; }
 
     public string Endpoint => $"http://{Host}:{Port}";
 

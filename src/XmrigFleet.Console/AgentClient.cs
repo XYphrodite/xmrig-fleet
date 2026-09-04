@@ -58,6 +58,32 @@ public sealed class AgentClient : IDisposable
     public Task<CommandResultDto?> StopAsync(CancellationToken ct) => PostAsync("miner/stop", ct);
     public Task<CommandResultDto?> RestartAsync(CancellationToken ct) => PostAsync("miner/restart", ct);
 
+    public Task<CommandResultDto?> GpuStartAsync(CancellationToken ct) => PostAsync("gpu/start", ct);
+    public Task<CommandResultDto?> GpuStopAsync(CancellationToken ct) => PostAsync("gpu/stop", ct);
+    public Task<CommandResultDto?> GpuRestartAsync(CancellationToken ct) => PostAsync("gpu/restart", ct);
+
+    /// <summary>
+    /// The GPU miner's own view of itself. Returns null on an agent that predates GPU mining,
+    /// which the caller reports rather than treats as an error, the same way
+    /// <see cref="GetThrottleLogAsync"/> does - a mixed-version fleet is normal mid-roll-out.
+    /// </summary>
+    public async Task<GpuMinerStatusDto?> GetGpuAsync(CancellationToken ct)
+    {
+        using var response = await _http.GetAsync("gpu", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<GpuMinerStatusDto>(JsonOptions, ct);
+    }
+
+    /// <inheritdoc cref="GetGpuAsync"/>
+    public async Task<LogTailDto?> GetGpuLogsAsync(CancellationToken ct)
+    {
+        using var response = await _http.GetAsync("gpu/logs", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<LogTailDto>(JsonOptions, ct);
+    }
+
     public async Task<MinerConfigDto?> PutConfigAsync(MinerConfigDto patch, CancellationToken ct)
     {
         using var response = await _http.PutAsJsonAsync("config", patch, JsonOptions, ct);

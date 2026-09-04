@@ -95,6 +95,9 @@ public sealed record NodeSnapshotDto(AgentInfoDto Agent, MinerStatusDto Miner, H
     /// could sit at 60% of its hashrate with the setting reading on and nothing to say otherwise.
     /// </summary>
     public string? MonitorNotice { get; init; }
+
+    /// <summary>Null on an agent too old to mine on the GPU, which is how the console tells them apart.</summary>
+    public GpuMinerStatusDto? GpuMiner { get; init; }
 }
 
 public sealed record CommandResultDto(bool Ok, string Message)
@@ -154,7 +157,153 @@ public sealed record MinerConfigDto
     /// down forever, or the agent starts mining that nobody asked for. Neither is acceptable.
     /// </summary>
     public bool? MinerStoppedByThrottle { get; init; }
+
+    /// <summary>
+    /// What this node's graphics card mines, if anything. Null leaves the node alone.
+    ///
+    /// Separate from the fields above rather than folded into them, because the two miners share
+    /// nothing: a different executable, a different pool, usually a different coin, and an
+    /// algorithm that is a property of the card rather than of the fleet.
+    /// </summary>
+    public GpuMinerSettingsDto? GpuMiner { get; init; }
+
+    /// <summary>
+    /// True when the GPU miner is stopped because the pause rule took the card, rather than
+    /// because an operator stopped it.
+    ///
+    /// Persisted for the same reason as <see cref="MinerStoppedByThrottle"/>: the agent restarts
+    /// often and the distinction cannot be recovered afterwards. Without it a paused node either
+    /// never mines again, or starts mining over somebody's shoulder.
+    /// </summary>
+    public bool? GpuStoppedByPause { get; init; }
 }
+
+/// <summary>
+/// What the node's graphics card mines, and under what conditions it gives the card back.
+///
+/// Every field is per-node in practice even though the console resolves a fleet-wide default
+/// first, because the right algorithm is a property of the card: an RTX 4060 earns 49 ₽/day on
+/// Cuckaroo29 while a 4 GB RX 6500 XT cannot run that algorithm at all and settles for NexaPoW at
+/// about a rouble and a half.
+/// </summary>
+public sealed record GpuMinerSettingsDto
+{
+    /// <summary>Off by default: a node only mines on its GPU once an operator asks it to.</summary>
+    public bool? Enabled { get; init; }
+
+    /// <summary>lolMiner's algorithm name, e.g. <c>CR29</c> or <c>NEXA</c>. Case is passed through.</summary>
+    public string? Algorithm { get; init; }
+
+    /// <summary>host:port of the mining pool.</summary>
+    public string? PoolUrl { get; init; }
+
+    /// <summary>
+    /// The pool login, whole and already formatted, because pools disagree about its shape:
+    /// unMineable wants <c>XMR:address.worker</c> and Kryptex wants <c>address/worker</c>.
+    /// Building it here would mean teaching the agent every pool's dialect.
+    /// </summary>
+    public string? User { get; init; }
+
+    public string? Password { get; init; }
+
+    /// <summary>Where lolMiner lives on the node. Written by the installer; null means not installed.</summary>
+    public string? ExecutablePath { get; init; }
+
+    /// <summary>
+    /// Loopback port for lolMiner's own HTTP API, which is where hashrate and share counts come
+    /// from. Deliberately not the xmrig API port: two miners answering on one port is a bug that
+    /// only shows up when both happen to be running.
+    /// </summary>
+    public int? ApiPort { get; init; }
+
+    /// <summary>
+    /// Launch the miner into the node's logged-on session instead of the agent's own session 0.
+    ///
+    /// Needed on some machines and not others, and the difference is not explained. On
+    /// mks68i7rtx lolMiner started from session 0 initialises both its backends and then stops
+    /// dead, never reaching worker-thread init; the identical command in the logged-on session
+    /// mines normally. On desktop-ib88isg session 0 is fine. Left null the agent uses session 0,
+    /// which is the cheaper path and works everywhere it works.
+    /// </summary>
+    public bool? RunInInteractiveSession { get; init; }
+
+    /// <summary>
+    /// When to give the card back to whoever is using the machine. Null means never.
+    /// </summary>
+    public GpuPauseRuleDto? PauseWhile { get; init; }
+}
+
+/// <summary>
+/// The condition under which GPU mining stands down, and how long it waits before returning.
+///
+/// Deliberately expressed as a port or a process rather than as "Ollama", which is only the case
+/// that prompted it. A local model, a game and a render all want the same thing from the miner.
+/// </summary>
+public sealed record GpuPauseRuleDto
+{
+    /// <summary>
+    /// Stand down while anything holds an established TCP connection to this local port.
+    ///
+    /// A connection, not a loaded model: a language model sits in video memory for twenty minutes
+    /// after one question and costs no GPU time while it does, so pausing on residency would give
+    /// up most of the day's mining for nothing. A request holds its connection open for exactly as
+    /// long as it needs the card.
+    /// </summary>
+    public int? TcpPort { get; init; }
+
+    /// <summary>Stand down while a process of this name is running. No extension, as Windows reports it.</summary>
+    public string? ProcessName { get; init; }
+
+    /// <summary>
+    /// Seconds of quiet before mining resumes. Standing down is immediate.
+    ///
+    /// The asymmetry matches the CPU throttle's, and for the same reason: a conversation is a
+    /// burst of requests with pauses in it, and restarting the miner between two questions both
+    /// wastes the restart and slows the next answer.
+    /// </summary>
+    public int? QuietSeconds { get; init; }
+}
+
+/// <summary>What the GPU miner is doing right now, so an idle card is never a mystery.</summary>
+public sealed record GpuMinerStatusDto
+{
+    public bool Running { get; init; }
+    public string? Algorithm { get; init; }
+    public string? Pool { get; init; }
+
+    /// <summary>
+    /// As the miner reports it, with its own unit alongside: algorithms are not comparable by
+    /// this number. 4.5 g/s of Cuckaroo29 out-earns 62 Mh/s of NexaPoW twelve times over.
+    /// </summary>
+    public double? Hashrate { get; init; }
+    public string? HashrateUnit { get; init; }
+
+    public int? AcceptedShares { get; init; }
+
+    /// <summary>
+    /// Shares the pool received too late to pay for. Worth a column of its own: a stale rate of
+    /// 18% was how a mis-set process priority announced itself, and nothing else showed it.
+    /// </summary>
+    public int? StaleShares { get; init; }
+    public int? RejectedShares { get; init; }
+
+    public IReadOnlyList<GpuDeviceStatusDto> Devices { get; init; } = [];
+
+    /// <summary>
+    /// Why the miner is not running, when it is not. "paused - port 11434 busy" and "stopped by
+    /// the operator" are different answers and the console must not print one for the other.
+    /// </summary>
+    public string? Notice { get; init; }
+}
+
+/// <summary>One card as the GPU miner sees it, which is not always what the sensors see.</summary>
+public sealed record GpuDeviceStatusDto(
+    string Name,
+    double? Hashrate,
+    double? TemperatureC,
+    double? FanPercent,
+    double? CoreClockMhz,
+    double? MemoryClockMhz);
 
 /// <summary>
 /// One rung of the throttle ladder: at or above <see cref="OtherCpuPercent"/> of CPU used by

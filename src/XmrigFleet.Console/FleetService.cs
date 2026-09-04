@@ -24,6 +24,18 @@ public sealed record NodeState(NodeConfig Node, NodeSnapshotDto? Snapshot, strin
 
     /// <summary>Null on an agent too old to throttle, which is why the column can be blank.</summary>
     public ThrottleStatusDto? Throttle => Snapshot?.Throttle;
+
+    /// <summary>Null on an agent too old to mine on the GPU, which is why the columns can be absent.</summary>
+    public GpuMinerStatusDto? Gpu => Snapshot?.GpuMiner;
+
+    public bool GpuMining => Snapshot?.GpuMiner?.Running == true;
+
+    /// <summary>
+    /// As the card's own miner reports it. Deliberately never summed across nodes: 4.5 g/s of
+    /// Cuckaroo29 and 62 Mh/s of NexaPoW are not the same quantity, and adding them would produce
+    /// a number that means nothing.
+    /// </summary>
+    public double GpuHashrate => Snapshot?.GpuMiner?.Hashrate ?? 0;
 }
 
 /// <summary>Fans requests out to every enabled node and keeps the latest answer for each.</summary>
@@ -123,6 +135,48 @@ public sealed class FleetService
 
             return CommandResultDto.Success(Describe(applied));
         }, ct);
+
+    /// <summary>
+    /// Sends each node what its graphics card should mine: the fleet's answer with that node's
+    /// exceptions already laid over it.
+    ///
+    /// Resolved on this machine rather than the node, like the throttle, and it matters more here.
+    /// The algorithm belongs to the card - a 4 GB RX 6500 XT cannot run the Cuckaroo29 an RTX 4060
+    /// earns on - so a fleet-wide instruction is only ever half an answer.
+    /// </summary>
+    public Task<IReadOnlyList<(NodeConfig Node, CommandResultDto Result)>> PushGpuMinerAsync(
+        IEnumerable<NodeConfig> nodes,
+        CancellationToken ct) =>
+        ForEachAsync(nodes, async (node, client, token) =>
+        {
+            var settings = _config.GpuMinerFor(node);
+
+            var saved = await client.PutConfigAsync(new MinerConfigDto { GpuMiner = settings }, token);
+            if (saved is null) return CommandResultDto.Failure("empty response");
+
+            // The read-back is the point, exactly as it is for autostart: an agent too old to know
+            // the field accepts the push and drops it, and an operator told "pushed" would only
+            // find out when the card sat idle.
+            var applied = saved.GpuMiner;
+            if (applied is null)
+                return CommandResultDto.Failure("this agent is too old to mine on the GPU; run upgrade-agents");
+
+            return CommandResultDto.Success(DescribeGpuSettings(applied));
+        }, ct);
+
+    /// <summary>What a node was actually left set to, in the operator's terms.</summary>
+    public static string DescribeGpuSettings(GpuMinerSettingsDto settings)
+    {
+        var what = settings.Enabled == true
+            ? $"{settings.Algorithm ?? "no algorithm"} on {settings.PoolUrl ?? "no pool"}"
+            : "off";
+
+        return settings.PauseWhile is { } pause && pause.TcpPort is not null
+            ? $"{what}, pausing while port {pause.TcpPort} is busy"
+            : settings.PauseWhile is { ProcessName: { } process }
+                ? $"{what}, pausing while {process} runs"
+                : what;
+    }
 
     /// <summary>
     /// Reads or sets one node's autostart, for either fan-out to run. Null reports and changes

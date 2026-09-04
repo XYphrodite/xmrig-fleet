@@ -40,6 +40,12 @@ public static class Cli
           no options   report what each node does when it boots
           --on         mine as soon as the agent starts, with nobody signed in
           --off        wait to be told, which is how a fresh node behaves
+
+        gpu [node ...] [--sync | --start | --stop]
+          no options   report what each card is mining, and its share quality
+          --sync       push the algorithm, pool and pause rule from fleet.json
+          --start      start GPU mining
+          --stop       stop it, without touching the CPU miner
         """;
 
     public static async Task<int> RunAsync(string[] args, FleetConfig config, FleetService fleet, MarketService market, CancellationToken ct)
@@ -80,6 +86,9 @@ public static class Cli
 
             case "autostart":
                 return await AutoStartAsync(config, fleet, names, ct);
+
+            case "gpu":
+                return await GpuAsync(config, fleet, names, ct);
 
             case "version" or "--version" or "v":
                 AnsiConsole.WriteLine($"xmrig-fleet {UpdateService.CurrentVersion}");
@@ -258,6 +267,84 @@ public static class Cli
     /// looks wrong: the rung and the reason answer "is it throttled, or is it broken" in one line,
     /// and those two have very different remedies.
     /// </summary>
+    /// <summary>
+    /// Reports or drives GPU mining. With no flag it reports, which is the safe default for a
+    /// command that can otherwise take a card away from whoever is using the machine.
+    /// </summary>
+    private static async Task<int> GpuAsync(FleetConfig config, FleetService fleet, string[] args, CancellationToken ct)
+    {
+        var names = args.Where(a => !a.StartsWith('-')).ToArray();
+        var start = args.Contains("--start");
+        var stop = args.Contains("--stop");
+        var sync = args.Contains("--sync");
+
+        if (start && stop)
+        {
+            AnsiConsole.MarkupLine("[red]--start and --stop ask for opposite things.[/]");
+            return 2;
+        }
+
+        var targets = names.Length == 0
+            ? fleet.EnabledNodes
+            : names.Select(config.FindNode).OfType<NodeConfig>().ToList();
+
+        foreach (var name in names.Where(n => config.FindNode(n) is null))
+            AnsiConsole.MarkupLine($"[red]No node named '{Markup.Escape(name)}'.[/]");
+
+        if (targets.Count == 0)
+        {
+            AnsiConsole.MarkupLine("[yellow]Nothing to do.[/]");
+            return 1;
+        }
+
+        if (sync)
+        {
+            var pushed = await fleet.PushGpuMinerAsync(targets, ct);
+            foreach (var (node, result) in pushed.OrderBy(r => r.Node.Name, StringComparer.OrdinalIgnoreCase))
+                UiHelpers.Result(result.Ok, $"{node.Name}: {result.Message}");
+
+            return pushed.All(r => r.Result.Ok) ? 0 : 1;
+        }
+
+        if (start || stop)
+        {
+            var acted = await fleet.ForEachAsync(
+                targets,
+                (_, client, token) => start ? client.GpuStartAsync(token) : client.GpuStopAsync(token),
+                ct);
+            foreach (var (node, result) in acted.OrderBy(r => r.Node.Name, StringComparer.OrdinalIgnoreCase))
+                UiHelpers.Result(result.Ok, $"{node.Name}: {result.Message}");
+
+            return acted.All(r => r.Result.Ok) ? 0 : 1;
+        }
+
+        var states = (await fleet.PollAsync(ct))
+            .Where(s => targets.Any(t => t.Name == s.Node.Name))
+            .ToList();
+        var table = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey35)
+            .AddColumn("Node")
+            .AddColumn("GPU")
+            .AddColumn(new TableColumn("Shares").RightAligned())
+            .AddColumn("Algorithm")
+            .AddColumn("Pool");
+
+        foreach (var state in states.OrderBy(s => s.Node.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            table.AddRow(
+                new Markup(UiHelpers.Escape(state.Node.Name)),
+                new Markup(UiHelpers.GpuBadge(state.Gpu)),
+                new Markup(UiHelpers.GpuShares(state.Gpu)),
+                new Markup(UiHelpers.Escape(state.Gpu?.Algorithm ?? "-")),
+                new Markup(UiHelpers.Escape(state.Gpu?.Pool ?? "-")));
+        }
+
+        AnsiConsole.Write(table);
+
+        // A node whose agent predates GPU mining is not an error, but it is not a success either:
+        // the operator asked about a card and got no answer for it.
+        return states.Any(s => s.Online && s.Gpu is null) ? 1 : 0;
+    }
+
     private static async Task<int> ThrottleAsync(FleetConfig config, FleetService fleet, string[] args, CancellationToken ct)
     {
         var names = args.Where(a => !a.StartsWith('-')).ToArray();
