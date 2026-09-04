@@ -529,7 +529,9 @@ xmrig-fleet/
       node, not through this code. What is new here is the agent owning that miner the way it owns
       XMRig: `/gpu`, `/gpu/start`, `/gpu/stop`, `/gpu/restart`, `/gpu/logs`, the card's state
       inside `/status`, settings resolved on the operator's machine and pushed, two dashboard
-      columns and `xmrig-fleet gpu`. Built and unit-tested; no node has been driven through it yet
+      columns and `xmrig-fleet gpu`. A card set to work resumes after a reboot with no autostart
+      setting of its own — `enabled` already answers that question, which is what makes the agent a
+      replacement for a scheduled task rather than a downgrade from one. Built and unit-tested
 - [ ] **Handing the card back on demand.** `GpuPauseService` stands the miner down while a named
       TCP port has a live connection or a named process is running, and resumes after a quiet
       period. Generalised deliberately: a local model, a game and a render all want the card for
@@ -598,11 +600,13 @@ xmrig-fleet/
       runs over names — what has been checked live is `/info`, not a full `status` fan-out
 
 ### Known Issues / Risks ⚠️
-- **GPU mining cannot yet start in a node's logged-on session, and on one node that is the only
-  place it works.** `lolMiner` stalls in session 0 on `mks68i7rtx` and runs normally from an
-  interactive task, which is how that card is mining today. `GpuMinerService` therefore refuses
+- **GPU mining cannot start in a node's logged-on session**, and `GpuMinerService` refuses
   `RunInInteractiveSession` with a message saying so rather than reporting a start that never
-  happens. Closing it means lifting the `CreateProcessAsUser` machinery out of
+  happens. Whether any node actually needs it is now doubtful: `mks68i7rtx` was believed to need an
+  interactive task because `lolMiner` stalled under a service, but that node runs PowerShell tasks
+  as its own user into an `0xC0000005`, which is the likelier culprit, and `lolMiner --list-devices`
+  from an SSH shell — session 0 — enumerates the RTX 4060 through CUDA without complaint. Closing
+  the gap for real would mean lifting the `CreateProcessAsUser` machinery out of
   `SessionMonitorService`, where it is private, entangled with monitor adoption, and worth ~60% of
   that node's CPU hashrate if broken. It also needs a fix that path does not currently need:
   `lpCommandLine` is passed as null today, and `CreateProcessW` writes into that buffer, so a

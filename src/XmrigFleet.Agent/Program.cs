@@ -179,6 +179,24 @@ if (app.Services.GetRequiredService<MinerConfigStore>().ShouldAutoStart(options.
     app.Logger.LogInformation("Autostart: {Message}", autoResult.Message);
 }
 
+// The card needs no setting of its own to answer the same question. `gpuMiner.enabled` already
+// says this card is meant to be working, so a node that came back on its own puts it back to work;
+// a card the operator disabled stays idle. Without this, moving a node off a scheduled task with a
+// boot trigger would be a downgrade - it would mine until the next reboot and never again.
+var gpuStore = app.Services.GetRequiredService<MinerConfigStore>();
+if (gpuStore.Current.GpuMiner?.Enabled == true)
+{
+    var autoGpu = app.Services.GetRequiredService<GpuMinerService>();
+    var gpuResult = await autoGpu.StartAsync(CancellationToken.None);
+    app.Logger.LogInformation("GPU autostart: {Message}", gpuResult.Message);
+
+    // GpuStoppedByPause describes a miner this agent stopped and owes a restart to. The miner is
+    // running again, so the debt is paid; leaving the flag set would let a later quiet tick
+    // "resume" a miner that nobody had paused.
+    if (gpuResult.Ok && gpuStore.Current.GpuStoppedByPause == true)
+        gpuStore.Update(new MinerConfigDto { GpuStoppedByPause = false });
+}
+
 app.Run();
 return;
 
