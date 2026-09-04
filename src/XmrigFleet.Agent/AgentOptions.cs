@@ -119,6 +119,8 @@ public sealed class MinerConfigStore
                 AutoStartMiner = patch.AutoStartMiner ?? _current.AutoStartMiner,
                 Throttle = MergeThrottle(_current.Throttle, patch.Throttle),
                 MinerStoppedByThrottle = patch.MinerStoppedByThrottle ?? _current.MinerStoppedByThrottle,
+                GpuMiner = MergeGpuMiner(_current.GpuMiner, patch.GpuMiner),
+                GpuStoppedByPause = patch.GpuStoppedByPause ?? _current.GpuStoppedByPause,
             };
             Save(_current);
             return _current;
@@ -160,6 +162,54 @@ public sealed class MinerConfigStore
             FloorLevel = patch.FloorLevel ?? current.FloorLevel,
             RampUpSeconds = patch.RampUpSeconds ?? current.RampUpSeconds,
             ManualLevel = patch.ClearManualLevel == true ? null : patch.ManualLevel ?? current.ManualLevel,
+        };
+    }
+
+    /// <summary>
+    /// Folds a GPU-miner patch into what the node already has, field by field, for the same reason
+    /// <see cref="MergeThrottle"/> does.
+    ///
+    /// Two fields here are the node's own knowledge rather than the operator's instruction, and
+    /// whole-object replacement would throw them away: <see cref="GpuMinerSettingsDto.ExecutablePath"/>
+    /// is written by the installer and nothing else knows where lolMiner landed, and
+    /// <see cref="GpuMinerSettingsDto.RunInInteractiveSession"/> records which launch path actually
+    /// works on this machine - a difference between two nodes that nobody has explained yet.
+    /// </summary>
+    private static GpuMinerSettingsDto? MergeGpuMiner(GpuMinerSettingsDto? current, GpuMinerSettingsDto? patch)
+    {
+        if (patch is null) return current;
+        if (current is null) return patch;
+
+        return new GpuMinerSettingsDto
+        {
+            Enabled = patch.Enabled ?? current.Enabled,
+            Algorithm = patch.Algorithm ?? current.Algorithm,
+            PoolUrl = patch.PoolUrl ?? current.PoolUrl,
+            User = patch.User ?? current.User,
+            Password = patch.Password ?? current.Password,
+            ExecutablePath = patch.ExecutablePath ?? current.ExecutablePath,
+            ApiPort = patch.ApiPort ?? current.ApiPort,
+            RunInInteractiveSession = patch.RunInInteractiveSession ?? current.RunInInteractiveSession,
+            PauseWhile = MergePauseRule(current.PauseWhile, patch.PauseWhile),
+        };
+    }
+
+    /// <summary>
+    /// Folds the pause rule. A rule names either a port or a process, so a patch that names one
+    /// must not inherit the other from what was there before - that would leave a node standing
+    /// down for two reasons when the operator asked for one.
+    /// </summary>
+    private static GpuPauseRuleDto? MergePauseRule(GpuPauseRuleDto? current, GpuPauseRuleDto? patch)
+    {
+        if (patch is null) return current;
+        if (current is null) return patch;
+
+        var namesACondition = patch.TcpPort is not null || patch.ProcessName is not null;
+        return new GpuPauseRuleDto
+        {
+            TcpPort = namesACondition ? patch.TcpPort : current.TcpPort,
+            ProcessName = namesACondition ? patch.ProcessName : current.ProcessName,
+            QuietSeconds = patch.QuietSeconds ?? current.QuietSeconds,
         };
     }
 

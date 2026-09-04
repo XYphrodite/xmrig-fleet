@@ -109,4 +109,42 @@ public sealed class MarkupSafetyTests
         UseTestConsole();
         AnsiConsole.MarkupLine(UiHelpers.Escape(text));
     }
+
+    [Fact]
+    public void GpuBadge_renders_a_notice_containing_markup()
+    {
+        UseTestConsole();
+
+        // Everything in this DTO is written by the node, not by the console: an algorithm name and
+        // a hashrate unit come from the miner's API, and the notice can carry an error message.
+        AnsiConsole.MarkupLine(UiHelpers.GpuBadge(new XmrigFleet.Contracts.GpuMinerStatusDto
+        {
+            Running = false,
+            Notice = "paused - port [11434] busy",
+        }));
+
+        AnsiConsole.MarkupLine(UiHelpers.GpuBadge(new XmrigFleet.Contracts.GpuMinerStatusDto
+        {
+            Running = true,
+            Hashrate = 4.48,
+            HashrateUnit = "g/s [tari]",
+        }));
+    }
+
+    [Fact]
+    public void GpuShares_renders_every_state_it_can_be_in()
+    {
+        UseTestConsole();
+
+        // Null and zero are different answers - an agent that cannot say against a card that has
+        // nothing to report - and both reach the markup parser.
+        AnsiConsole.MarkupLine(UiHelpers.GpuShares(null));
+        AnsiConsole.MarkupLine(UiHelpers.GpuShares(new XmrigFleet.Contracts.GpuMinerStatusDto { Running = true }));
+        AnsiConsole.MarkupLine(UiHelpers.GpuShares(new XmrigFleet.Contracts.GpuMinerStatusDto
+        {
+            Running = true,
+            AcceptedShares = 137,
+            StaleShares = 4,
+        }));
+    }
 }

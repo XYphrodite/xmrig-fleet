@@ -42,11 +42,14 @@ builder.Services.AddSingleton<SessionMonitorService>();
 builder.Services.AddSingleton<MinerCpuLimit>();
 builder.Services.AddSingleton(new ThrottleLog(basePath));
 builder.Services.AddSingleton<ThrottleService>();
+builder.Services.AddSingleton<GpuMinerService>();
+builder.Services.AddSingleton<GpuPauseService>();
 // Same instance both ways: the config endpoint calls Apply for an immediate response, the
 // background loop keeps the window alive and covers a logon that happens later.
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SessionMonitorService>());
 builder.Services.AddHostedService<PerformanceCounterPump>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ThrottleService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<GpuPauseService>());
 builder.Services.AddHttpClient("github", client =>
 {
     // The GitHub API rejects requests without a User-Agent.
@@ -101,16 +104,19 @@ var api = app.MapGroup("/api/v1");
 
 api.MapGet("/info", () => Info());
 
-api.MapGet("/status", async (MinerService miner, HardwareService hw, ThrottleService throttle, SessionMonitorService monitor, CancellationToken ct) =>
+api.MapGet("/status", async (MinerService miner, HardwareService hw, ThrottleService throttle, SessionMonitorService monitor, GpuMinerService gpu, CancellationToken ct) =>
 {
-    // Sensors and the miner API are independent, so read them together.
+    // Sensors and the two miner APIs are independent, so read them together. Both miner reads are
+    // capped by their own three-second client timeout, so this stays inside the console's eight.
     var minerTask = miner.GetStatusAsync(ct);
     var hardwareTask = hw.ReadAsync(ct);
-    await Task.WhenAll(minerTask, hardwareTask);
+    var gpuTask = gpu.GetStatusAsync(ct);
+    await Task.WhenAll(minerTask, hardwareTask, gpuTask);
     return new NodeSnapshotDto(Info(), minerTask.Result, hardwareTask.Result)
     {
         Throttle = throttle.Status(),
         MonitorNotice = monitor.Notice,
+        GpuMiner = gpuTask.Result,
     };
 });
 
@@ -144,6 +150,16 @@ api.MapGet("/throttle", (ThrottleService throttle) => throttle.Status());
 // and this is what they are meant to be corrected from.
 api.MapGet("/throttle/log", (ThrottleLog decisions, int? lines) =>
     new LogTailDto("throttle", decisions.Tail(lines ?? 100)));
+
+// The graphics card. A separate miner from xmrig in every respect - its own executable, pool,
+// coin and API - so it gets its own routes rather than a flag on the miner ones. Stopping GPU
+// mining must never be able to stop the CPU miner by accident.
+api.MapGet("/gpu", (GpuMinerService gpu, CancellationToken ct) => gpu.GetStatusAsync(ct));
+api.MapPost("/gpu/start", (GpuMinerService gpu, CancellationToken ct) => gpu.StartAsync(ct));
+api.MapPost("/gpu/stop", (GpuMinerService gpu, CancellationToken ct) => gpu.StopAsync(ct));
+api.MapPost("/gpu/restart", (GpuMinerService gpu, CancellationToken ct) => gpu.RestartAsync(ct));
+
+api.MapGet("/gpu/logs", (GpuMinerService gpu) => new LogTailDto("lolminer", gpu.RecentOutput));
 
 // Updates the agent itself and restarts into the new binary. The miner is a separate process
 // and keeps hashing; the node's token files are deliberately left untouched.

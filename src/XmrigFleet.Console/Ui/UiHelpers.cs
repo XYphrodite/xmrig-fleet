@@ -83,6 +83,41 @@ public static class UiHelpers
         return $"[{colour}]{throttle.Level}%{pin}[/]";
     }
 
+    /// <summary>
+    /// What the graphics card is doing, with the miner's own unit attached because the number
+    /// means nothing without it: 4.5 g/s of Cuckaroo29 out-earns 62 Mh/s of NexaPoW twelvefold.
+    ///
+    /// Three different silences, deliberately distinguished. A dimmed question mark is an agent
+    /// that predates GPU mining; a dash is a card that could mine and is not; a reason in words is
+    /// a card handed back to somebody who is using the machine.
+    /// </summary>
+    public static string GpuBadge(XmrigFleet.Contracts.GpuMinerStatusDto? gpu)
+    {
+        if (gpu is null) return "[grey]?[/]";
+        if (!gpu.Running)
+            return gpu.Notice is { Length: > 0 } notice ? $"[grey]{Escape(notice)}[/]" : "[grey]-[/]";
+
+        if (gpu.Hashrate is not { } rate) return "[yellow]starting[/]";
+        return $"[green]{rate:N2} {Escape(gpu.HashrateUnit ?? "")}[/]".Replace(" [/]", "[/]");
+    }
+
+    /// <summary>
+    /// Accepted shares against stale ones. Worth its own cell: a stale rate of 18% was how a
+    /// mis-set process priority announced itself on a live node, and nothing else showed it. A
+    /// stale share is work the pool will not pay for.
+    /// </summary>
+    public static string GpuShares(XmrigFleet.Contracts.GpuMinerStatusDto? gpu)
+    {
+        if (gpu is null) return "[grey]?[/]";
+        if (gpu.AcceptedShares is not { } accepted) return "[grey]-[/]";
+
+        var stale = (gpu.StaleShares ?? 0) + (gpu.RejectedShares ?? 0);
+        if (stale == 0) return $"[green]{accepted}[/]";
+
+        var colour = stale * 10 > accepted ? "red" : "yellow";
+        return $"[{colour}]{accepted}/{stale}[/]";
+    }
+
     public static string Money(double? amount, string currency) =>
         amount is null ? "[grey]-[/]" : $"{amount.Value:N2} {Escape(currency)}";
 
