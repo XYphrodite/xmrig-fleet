@@ -521,25 +521,29 @@ xmrig-fleet/
       `100.105.87.52`. Names also survive a hostname a DNS label cannot hold: that tailnet has
       a `moscow_enjoyer` and a `TECNO CAMON 20`, whose labels are `moscow-enjoyer` and
       `tecno-camon-20`, so the name is read from `DNSName` and never built from `HostName`
+- [x] **GPU mining driven end to end by the agent**, on `mks68i7rtx` (RTX 4060) on 2026-09-04. The
+      node was moved off the hand-built scheduled tasks it had been mining Tari under: agent
+      upgraded 1.9.5.0 -> 1.10.1 in place (345 files), `xmrig-fleet-gpu` and `xmrig-fleet-gpu-guard`
+      disabled, settings read out of the task being replaced and pushed to the agent, and the miner
+      started from `/gpu/start` — pid 19400, mining Cuckaroo29, 2 shares accepted and none stale.
+      The API port was deliberately kept at the task's 21556 so the node's existing `earn2.csv`
+      history does not break
+- [x] **The miner runs in session 0**, which the whole `RunInInteractiveSession` escape hatch was
+      built for and, on this node at least, is not needed. `lolMiner --list-devices` from an SSH
+      shell — session 0 — enumerates the RTX 4060 through CUDA, and the agent has since run the
+      miner there. The old belief conflated it with PowerShell scheduled tasks on that node dying
+      in `0xC0000005`, which is a real and separate fault
+- [x] **The pause rule, watched through a full cycle.** A request to the node's Ollama on 11434
+      stood the miner down on the next one-second tick; `/gpu` reported
+      `paused, 295s of quiet still needed` and counted down; the miner came back by itself at
+      16:43:33 after the full 300 s. A second request mid-countdown reset it to 299 s, which is the
+      restart-the-wait behaviour the unit tests assert, seen on real traffic
+- [x] **GPU autostart across an agent restart.** With the miner stopped and every scheduled task
+      disabled, restarting the agent service brought it back on its own —
+      `GPU autostart: GPU miner started on CR29, pid 18544` in the node's log. This is what makes
+      the agent a replacement for a task with a boot trigger rather than a downgrade from one
 
 ### Implemented, Not Yet Verified Live ⏳
-- [ ] **GPU mining as a fleet feature.** The mining itself is verified — an RTX 4060 has been on
-      Cuckaroo29 for days at ~4.5 g/s, and the numbers are in
-      [MiningMeasurements.md](MiningMeasurements.md) — but by hand-built scheduled tasks on the
-      node, not through this code. What is new here is the agent owning that miner the way it owns
-      XMRig: `/gpu`, `/gpu/start`, `/gpu/stop`, `/gpu/restart`, `/gpu/logs`, the card's state
-      inside `/status`, settings resolved on the operator's machine and pushed, two dashboard
-      columns and `xmrig-fleet gpu`. A card set to work resumes after a reboot with no autostart
-      setting of its own — `enabled` already answers that question, which is what makes the agent a
-      replacement for a scheduled task rather than a downgrade from one. Built and unit-tested
-- [ ] **Handing the card back on demand.** `GpuPauseService` stands the miner down while a named
-      TCP port has a live connection or a named process is running, and resumes after a quiet
-      period. Generalised deliberately: a local model, a game and a render all want the card for
-      the same reason, so the rule names a port or a process rather than an application. The
-      behaviour is proven — a hand-written guard on `mks68i7rtx` has been doing exactly this for
-      Ollama on 11434 with a five-minute quiet period — but by a PowerShell script, not by the
-      agent. Note the TCP table is read through `IPGlobalProperties`, because
-      `Get-NetTCPConnection` returns nothing from a service context; that was measured, not assumed
 - [ ] **Autostart from the console.** Whether a node mines as soon as its agent starts is now a
       pushed per-node setting rather than a hand edit to `appsettings.json` on the machine, with
       **Miner control → Start mining when the node boots** and `xmrig-fleet autostart` as its
@@ -602,15 +606,19 @@ xmrig-fleet/
 ### Known Issues / Risks ⚠️
 - **GPU mining cannot start in a node's logged-on session**, and `GpuMinerService` refuses
   `RunInInteractiveSession` with a message saying so rather than reporting a start that never
-  happens. Whether any node actually needs it is now doubtful: `mks68i7rtx` was believed to need an
-  interactive task because `lolMiner` stalled under a service, but that node runs PowerShell tasks
-  as its own user into an `0xC0000005`, which is the likelier culprit, and `lolMiner --list-devices`
-  from an SSH shell — session 0 — enumerates the RTX 4060 through CUDA without complaint. Closing
-  the gap for real would mean lifting the `CreateProcessAsUser` machinery out of
-  `SessionMonitorService`, where it is private, entangled with monitor adoption, and worth ~60% of
-  that node's CPU hashrate if broken. It also needs a fix that path does not currently need:
-  `lpCommandLine` is passed as null today, and `CreateProcessW` writes into that buffer, so a
-  managed string handed straight to it corrupts interned memory.
+  happens. As of 2026-09-04 no node is known to need it: `mks68i7rtx` was the reason the setting
+  exists, and it turns out to mine perfectly well from session 0 under the agent. Closing the gap
+  properly would mean lifting the `CreateProcessAsUser` machinery out of `SessionMonitorService`,
+  where it is private, entangled with monitor adoption, and worth ~60% of that node's CPU hashrate
+  if broken — so the setting stays a documented refusal until some node actually needs it. Note it
+  would also need a fix that path does not currently need: `lpCommandLine` is passed as null today,
+  and `CreateProcessW` writes into that buffer, so a managed string handed straight to it corrupts
+  interned memory.
+- **The agent does not keep lolMiner's own log file.** The scheduled task it replaced on
+  `mks68i7rtx` passed `--log on --logfile`, leaving `gpu.log` on disk across restarts; the agent
+  captures the last 200 lines in memory and serves them from `/gpu/logs`, which is gone the moment
+  the agent restarts. Nothing depends on the file today, but a miner that failed overnight now
+  leaves less behind than it used to.
 - **lolMiner is installed by hand.** `gpuMinerPath` records where it went; there is no
   `/gpu/install` to match the CPU miner's. A node whose path is wrong reports a clear failure
   rather than mining nothing quietly, but somebody still has to walk the file over.
