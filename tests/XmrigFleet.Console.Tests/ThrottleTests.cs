@@ -216,15 +216,4 @@ public class ThrottleTests
         reader.Reset();
         Assert.False(reader.Read().Usable);
     }
-
-    private sealed class TempDirectory : IDisposable
-    {
-        public string Path { get; } = Directory.CreateTempSubdirectory("xmrig-fleet-tests").FullName;
-
-        public void Dispose()
-        {
-            try { Directory.Delete(Path, recursive: true); }
-            catch (IOException) { }
-        }
-    }
 }
