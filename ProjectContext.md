@@ -717,7 +717,7 @@ xmrig-fleet/
 
 **Document Version**: v1.2
 **Last Updated**: 2026-09-04
-**Product Version**: 1.10.0
+**Product Version**: 1.10.1
 **Status**: Active
 **Repository**: `c:\Repos\xmrig-fleet` (branch `master`), published at
 [github.com/XYphrodite/xmrig-fleet](https://github.com/XYphrodite/xmrig-fleet)
