@@ -29,6 +29,7 @@ public sealed class MinerScreen
                     "Restart mining",
                     "Install / update xmrig",
                     "Push pool settings to nodes",
+                    "Start mining when the node boots",
                     "Session monitor (hashrate workaround)",
                     "Power limit while the PC is in use",
                     "View miner log",
@@ -41,6 +42,7 @@ public sealed class MinerScreen
                 case "Restart mining": await RunAsync("Restarting", (c, t) => c.RestartAsync(t), ct); break;
                 case "Install / update xmrig": await InstallAsync(ct); break;
                 case "Push pool settings to nodes": await PushAsync(ct); break;
+                case "Start mining when the node boots": await AutoStartAsync(ct); break;
                 case "Session monitor (hashrate workaround)": await SessionMonitorAsync(ct); break;
                 case "Power limit while the PC is in use": await ThrottleAsync(ct); break;
                 case "View miner log": await LogsAsync(ct); break;
@@ -133,6 +135,62 @@ public sealed class MinerScreen
         // Remember the path so the next install and the config push prefill correctly.
         foreach (var node in nodes) node.MinerPath = targetPath;
         _config.Save();
+
+        UiHelpers.Pause();
+    }
+
+    /// <summary>
+    /// Turns autostart on or off per node, and reports what each node is set to now.
+    ///
+    /// The agent has always had the flag, but only in its own appsettings.json, which meant a
+    /// remote hand edit and a service restart per node. It belongs here because it is the
+    /// setting that decides whether an outage costs an hour or costs until somebody notices.
+    /// </summary>
+    private async Task AutoStartAsync(CancellationToken ct)
+    {
+        UiHelpers.Header("Start mining when the node boots");
+
+        AnsiConsole.MarkupLine(
+            "The agent puts the miner to work as soon as it starts, so a node that came back on");
+        AnsiConsole.MarkupLine(
+            "its own - mains failure, bugcheck, service restart - returns to mining with nobody");
+        AnsiConsole.MarkupLine(
+            "signed in to tell it to.");
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine(
+            "[yellow]This does not start mining now[/], and it does not overrule the power limit: a");
+        AnsiConsole.MarkupLine(
+            "node the limit took to zero stays down, because somebody is using that machine.");
+        AnsiConsole.MarkupLine(
+            "[grey]A node never told either way keeps doing whatever its own appsettings.json says.[/]");
+        AnsiConsole.WriteLine();
+
+        var nodes = UiHelpers.SelectNodes(_config, "Change which nodes?");
+        if (nodes.Count == 0) return;
+
+        IReadOnlyList<(NodeConfig Node, CommandResultDto Result)> current = [];
+        await AnsiConsole.Status().StartAsync("Reading current settings...", async _ =>
+        {
+            current = await _fleet.ForEachAsync(nodes, FleetService.AutoStartAction(null), ct);
+        });
+
+        AnsiConsole.MarkupLine("[grey]Now:[/]");
+        foreach (var (node, result) in current.OrderBy(r => r.Node.Name, StringComparer.OrdinalIgnoreCase))
+            UiHelpers.Result(result.Ok, $"{node.Name}: {result.Message}");
+        AnsiConsole.WriteLine();
+
+        var enable = AnsiConsole.Prompt(
+            new SelectionPrompt<string>().Title("Autostart should be").AddChoices("on", "off"))
+            == "on";
+
+        IReadOnlyList<(NodeConfig Node, CommandResultDto Result)> results = [];
+        await AnsiConsole.Status().StartAsync(enable ? "Enabling..." : "Disabling...", async _ =>
+        {
+            results = await _fleet.ForEachAsync(nodes, FleetService.AutoStartAction(enable), ct);
+        });
+
+        foreach (var (node, result) in results.OrderBy(r => r.Node.Name, StringComparer.OrdinalIgnoreCase))
+            UiHelpers.Result(result.Ok, $"{node.Name}: {result.Message}");
 
         UiHelpers.Pause();
     }

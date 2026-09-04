@@ -14,7 +14,13 @@ public sealed class AgentOptions
     /// <summary>Loopback port xmrig's own HTTP API is started on.</summary>
     public int XmrigApiPort { get; set; } = 47801;
 
-    /// <summary>Start the miner as soon as the agent starts.</summary>
+    /// <summary>
+    /// Start the miner as soon as the agent starts.
+    ///
+    /// This is only the installed default now. Once an operator has set autostart from the
+    /// console the node's own miner.json holds the answer and this is not consulted - see
+    /// <see cref="MinerConfigStore.ShouldAutoStart"/>.
+    /// </summary>
     public bool AutoStartMiner { get; set; }
 
     /// <summary>
@@ -110,6 +116,7 @@ public sealed class MinerConfigStore
                 ExtraArgs = patch.ExtraArgs ?? _current.ExtraArgs,
                 PowerFallbackWatts = patch.PowerFallbackWatts ?? _current.PowerFallbackWatts,
                 KeepMonitorOpen = patch.KeepMonitorOpen ?? _current.KeepMonitorOpen,
+                AutoStartMiner = patch.AutoStartMiner ?? _current.AutoStartMiner,
                 Throttle = MergeThrottle(_current.Throttle, patch.Throttle),
                 MinerStoppedByThrottle = patch.MinerStoppedByThrottle ?? _current.MinerStoppedByThrottle,
             };
@@ -117,6 +124,21 @@ public sealed class MinerConfigStore
             return _current;
         }
     }
+
+    /// <summary>
+    /// Whether the agent should put the miner to work the moment it starts.
+    ///
+    /// The node's own answer wins, and <paramref name="installedDefault"/> - the flag
+    /// <c>install-agent.ps1</c> wrote into appsettings.json - only applies until an operator
+    /// has said otherwise from the console. A node the throttle stopped is left alone either
+    /// way: autostart exists so a rig that rebooted returns to work, not so a machine somebody
+    /// is using starts mining under them again.
+    /// </summary>
+    public bool ShouldAutoStart(bool installedDefault) => ShouldAutoStart(Current, installedDefault);
+
+    /// <inheritdoc cref="ShouldAutoStart(bool)"/>
+    public static bool ShouldAutoStart(MinerConfigDto config, bool installedDefault) =>
+        (config.AutoStartMiner ?? installedDefault) && config.MinerStoppedByThrottle != true;
 
     /// <summary>
     /// Folds a throttle patch into what the node already has, field by field.

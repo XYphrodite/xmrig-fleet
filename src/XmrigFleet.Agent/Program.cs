@@ -152,7 +152,11 @@ api.MapPost("/agent/update", (AgentUpdateRequestDto request, AgentUpdateService 
 
 app.Logger.LogInformation("xmrig-fleet agent {Version} listening on {Url}", agentVersion, options.ListenUrl);
 
-if (options.AutoStartMiner)
+// What the operator set from the console wins over what the installer wrote; see
+// MinerConfigStore.ShouldAutoStart. Deciding it here rather than reading options.AutoStartMiner
+// is the whole point of the setting: a node that reboots on its own - after a mains failure or
+// a bugcheck - has nobody to sign in and start it.
+if (app.Services.GetRequiredService<MinerConfigStore>().ShouldAutoStart(options.AutoStartMiner))
 {
     var autoMiner = app.Services.GetRequiredService<MinerService>();
     var autoResult = await autoMiner.StartAsync(CancellationToken.None);

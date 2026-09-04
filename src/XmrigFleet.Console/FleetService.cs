@@ -124,6 +124,46 @@ public sealed class FleetService
             return CommandResultDto.Success(Describe(applied));
         }, ct);
 
+    /// <summary>
+    /// Reads or sets one node's autostart, for either fan-out to run. Null reports and changes
+    /// nothing; true or false sets it.
+    ///
+    /// A setter reports what the node actually stored rather than what it was asked for, and
+    /// that read-back is the point: an agent too old to know the field accepts the push and
+    /// drops it on the floor. An operator told "on" over that finds out at the next outage -
+    /// the one moment the setting existed for.
+    /// </summary>
+    public static Func<AgentClient, CancellationToken, Task<CommandResultDto?>> AutoStartAction(bool? set) =>
+        async (client, token) =>
+        {
+            if (set is not { } enable)
+            {
+                var current = await client.GetConfigAsync(token);
+                return current is null
+                    ? CommandResultDto.Failure("empty response")
+                    : CommandResultDto.Success(DescribeAutoStart(current.AutoStartMiner));
+            }
+
+            var saved = await client.PutConfigAsync(new MinerConfigDto { AutoStartMiner = enable }, token);
+            if (saved is null) return CommandResultDto.Failure("empty response");
+
+            return saved.AutoStartMiner == enable
+                ? CommandResultDto.Success(DescribeAutoStart(saved.AutoStartMiner))
+                : CommandResultDto.Failure("this agent is too old to autostart; run upgrade-agents");
+        };
+
+    /// <summary>
+    /// How a node's autostart setting reads to an operator. Null is an answer in its own right
+    /// and not a synonym for off: nobody has told that node either way, so it is still doing
+    /// whatever its own appsettings.json was installed with.
+    /// </summary>
+    public static string DescribeAutoStart(bool? autoStart) => autoStart switch
+    {
+        true => "starts mining at boot",
+        false => "stays idle at boot",
+        null => "unset - follows the node's appsettings.json",
+    };
+
     private static string Describe(ThrottleSettingsDto settings)
     {
         if (settings.Enabled != true) return "throttling off";

@@ -23,6 +23,7 @@ public static class Cli
           update         download and install a newer xmrig-fleet
           upgrade-agents update the agent on the nodes themselves
           throttle       show, push or pin the mining power limit
+          autostart      show or set whether a node mines as soon as it boots
           version        print the running version
           help           this text
 
@@ -34,6 +35,11 @@ public static class Cli
           --set=N      pin N percent (0-100) and stand the automation down
           --auto       hand control back to the automation
           --log        print the node's own record of its decisions
+
+        autostart [node ...] [--on | --off]
+          no options   report what each node does when it boots
+          --on         mine as soon as the agent starts, with nobody signed in
+          --off        wait to be told, which is how a fresh node behaves
         """;
 
     public static async Task<int> RunAsync(string[] args, FleetConfig config, FleetService fleet, MarketService market, CancellationToken ct)
@@ -71,6 +77,9 @@ public static class Cli
 
             case "throttle":
                 return await ThrottleAsync(config, fleet, names, ct);
+
+            case "autostart":
+                return await AutoStartAsync(config, fleet, names, ct);
 
             case "version" or "--version" or "v":
                 AnsiConsole.WriteLine($"xmrig-fleet {UpdateService.CurrentVersion}");
@@ -362,6 +371,27 @@ public static class Cli
         }
 
         return ok ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Reports or sets autostart per node. Reporting is what it does with no flags, because the
+    /// answer matters most right after an unattended reboot - exactly when nobody is watching
+    /// and a scheduled task is all there is to notice a rig came back idle.
+    /// </summary>
+    private static async Task<int> AutoStartAsync(FleetConfig config, FleetService fleet, string[] args, CancellationToken ct)
+    {
+        var names = args.Where(a => !a.StartsWith('-')).ToArray();
+        var on = args.Contains("--on");
+        var off = args.Contains("--off");
+
+        if (on && off)
+        {
+            AnsiConsole.MarkupLine("[red]--on and --off ask for opposite things.[/]");
+            return 2;
+        }
+
+        var set = on ? true : off ? false : (bool?)null;
+        return await ControlAsync(config, fleet, names, FleetService.AutoStartAction(set), ct);
     }
 
     private static async Task<int> ControlAsync(

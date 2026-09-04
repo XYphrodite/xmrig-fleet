@@ -130,6 +130,17 @@ public sealed record MinerConfigDto
     public bool? KeepMonitorOpen { get; init; }
 
     /// <summary>
+    /// Start mining as soon as the agent starts, so a node that came back on its own - after a
+    /// mains failure, after a bugcheck, after a service restart - returns to work without
+    /// anybody signing in to tell it to.
+    ///
+    /// Null leaves the node's current setting alone, which is what a pool-settings push sends.
+    /// A node nobody has ever told falls back to <c>Agent:AutoStartMiner</c> in its own
+    /// appsettings.json, so a fresh install still behaves the way it was installed.
+    /// </summary>
+    public bool? AutoStartMiner { get; init; }
+
+    /// <summary>
     /// How hard the miner may run while the machine is in use. Null leaves the node alone.
     /// </summary>
     public ThrottleSettingsDto? Throttle { get; init; }
