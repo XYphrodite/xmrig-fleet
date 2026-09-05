@@ -66,7 +66,7 @@ taken under a hand-built scheduled task instead, which is worth knowing when com
 | Etchash | unMineable | 31.4 Mh/s | **1.32 ₽/day** *measured*, 86 min | 63 °C / 31% | Worst of the working set |
 | FishHash | unMineable | 21.0 Mh/s | **2.96 ₽/day** *measured*, 50 min | 65 °C / 37% | Middle |
 | NexaPoW | unMineable | 62–64.6 Mh/s | **4.0 ₽/day** *measured*, two windows | 81 °C / 100% | Best on unMineable; also the most heat |
-| Cuckaroo29 (Tari) | Kryptex | 4.48 g/s | **49.5 ₽/day** *measured*, 9 h 25 min | 69 °C / 40% | Current. **12x** the best unMineable result, and the only GPU configuration here that beats its own electricity |
+| Cuckaroo29 (Tari) | Kryptex | 4.48 g/s | **1,039 XTM/day** *measured from five actual payouts* — ≈72 ₽/day at the 2026-09-05 price, ≈59 ₽ net | 69 °C / 40% | Current. Out-earns the entire CPU fleet, and the only GPU configuration here that beats its own electricity |
 
 Cuckaroo29 benchmarked at **4.53 g/s** with no pool attached, against a third-party reference of
 4.07 g/s — this card runs above spec.
@@ -271,14 +271,55 @@ P2Pool-based stack. Pools supporting it were experimental as of 2024.
 **Test**: stand the stack up on one node, point that node's xmrig at the proxy, and compare its XMR
 credit before and after — merge mining must not reduce it — while watching XTM accrue.
 
-### 2. Does the Tari payout actually arrive?
+### 2. Does the Tari payout actually arrive? — answered on 2026-09-05: **yes**
 
-Everything about Tari so far is a pool-side balance, not received money. After 9 h 25 min:
-**44.30 XTM confirmed, 348.55 XTM pending, 0 paid.** Kryptex pays from the confirmed balance at a
-200 XTM threshold, and pending coins mature after 60 blocks — so the first payout is still ahead.
+Five payouts, every one `FINISHED` with a transaction id:
 
-**Test**: read the Tari wallet after 24 h. Until coins land, treat 49.5 ₽/day as unconfirmed. This
-is the same discipline that caught pearlhash paying zero while the card looked busy at 89 W.
+| Paid at | XTM |
+|---|---:|
+| 2026-09-04 15:05 | 202.61 |
+| 2026-09-04 18:05 | 214.89 |
+| 2026-09-05 00:05 | 255.32 |
+| 2026-09-05 06:05 | 219.22 |
+| 2026-09-05 13:05 | 263.07 |
+| **paid** | **1,155.12** |
+| still on the pool | 90.35 confirmed + 173.33 unconfirmed |
+
+The four payouts after the first span **22 h and 952.50 XTM**, so the card earns **≈1,039 XTM/day**.
+That figure is the measurement; the rouble one is it multiplied by a price that moves. At
+$0.00080716 (Kryptex's own chart) and 85.78 ₽/$ that is **≈72 ₽/day**, against ~13 ₽/day of
+electricity at 110 W and 5 ₽/kWh — so **≈59 ₽/day net**.
+
+Note this is higher than the 49.5 ₽/day recorded above, and the coin flow is not what changed:
+the hashrate is the same 4.4–4.5 g/s. Price and network difficulty are. **Always keep the XTM/day
+separate from the ₽/day** — one is what the card did, the other is what the market did.
+
+For scale: the whole CPU fleet earns about 45 ₽/day. This one card out-earns it, and Economics
+shows none of it.
+
+**Nothing can be verified on-chain.** Tari is private by default and its block explorer states
+plainly that address balances are not visible. The pool's record and the operator's own Tari
+Universe wallet are the only two places the money can be seen.
+
+### 2a. Kryptex has a documented public API, and it needs no key
+
+Found the same day, which makes the pool adapter in the roadmap a small job rather than a scrape.
+`https://pool.kryptex.com/openapi.yaml` is the spec. The path shape puts the coin **first**, which
+is why the obvious guesses all 404:
+
+```
+https://pool.kryptex.com/{coin}/api/v1/miner/balance/{address}
+https://pool.kryptex.com/{coin}/api/v1/miner/payouts/{address}
+https://pool.kryptex.com/{coin}/api/v1/miner/payouts/{address}/stats
+https://pool.kryptex.com/api/v1/coin/{coin}/price/chart
+```
+
+`{coin}` is the algorithm-specific slug — `xtm-c29` here, not `xtm`. `balance` returns
+`total / unconfirmed / confirmed / threshold / reached_pct`, `payouts/stats` returns
+`reward.week / reward.month / paid / unpaid`, and the price chart returns USD points.
+
+CoinGecko's id for the coin is **`minotari`**, not `tari` — the obvious one returns an empty
+object rather than an error, which is exactly the shape of a bug nobody notices.
 
 ### 3. Is the 0.454 unMineable haircut real?
 

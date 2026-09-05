@@ -618,9 +618,15 @@ xmrig-fleet/
       session launcher (without it one node cannot be driven from the console at all), a
       `GpuInstallerService` so lolMiner arrives the way XMRig does, a `GpuScreen` in the TUI, and a
       per-node record of every pause and resume the way `throttle.log` records rungs
-- [ ] **Pool adapters for what a card actually earns.** Kryptex and unMineable both publish a
-      balance API. Until they are read, the card's electricity is charged and its income is not,
-      which makes Economics read worse than the truth
+- [ ] **Pool adapters for what a card actually earns.** Now a small job rather than a scrape:
+      Kryptex publishes an OpenAPI spec at `pool.kryptex.com/openapi.yaml` and needs no key.
+      `{coin}/api/v1/miner/balance/{address}` and `.../payouts/{address}/stats` give confirmed,
+      unconfirmed, paid and unpaid; the coin slug is algorithm-specific (`xtm-c29`, not `xtm`) and
+      the coin comes **before** `/api/v1`, which is why every obvious guess 404s. Worth doing: the
+      RTX 4060 is measured at 1,039 XTM/day from five actual payouts, against a whole CPU fleet
+      earning about 45 ₽/day, and none of it reaches Economics. Note the card mines a coin
+      Hashvault has never heard of, so `MarketService` needs a second source rather than another
+      endpoint on the first, and CoinGecko's id for it is `minotari`
 - [ ] **Roll PawnIO out to the rest of the fleet.** Proven on `mks68i7rtx` (see the verified
       list); `desktop-ib88isg` and `re-7lqd67ahcm0r` still report no CPU power at all. The dev box
       is the awkward one: Memory Integrity is on there (`SecurityServicesRunning=2`), which is the
@@ -656,10 +662,13 @@ xmrig-fleet/
 - **lolMiner is installed by hand.** `gpuMinerPath` records where it went; there is no
   `/gpu/install` to match the CPU miner's. A node whose path is wrong reports a clear failure
   rather than mining nothing quietly, but somebody still has to walk the file over.
-- **A card's earnings are not in Economics.** The electricity a mining card burns is measured and
-  charged like any other draw, but the income side reads Hashvault, which knows only Monero. A
-  fleet with GPU mining on therefore shows its cost and not its revenue. Measured figures live in
-  [MiningMeasurements.md](MiningMeasurements.md) until pool adapters exist.
+- **A card's earnings are not in Economics, and the gap is now sized.** The electricity a mining
+  card burns is charged like any other draw, but the income side reads Hashvault, which knows only
+  Monero. As of 2026-09-05 the RTX 4060 has been **paid 1,155 XTM across five completed payouts** —
+  about 1,039 XTM/day, worth roughly what the whole CPU fleet earns — and Economics shows none of
+  it. So the fleet does not merely understate its revenue: it reports a profit that is wrong by
+  more than the profit itself. Measured figures live in
+  [MiningMeasurements.md](MiningMeasurements.md) until the pool adapter exists.
 - **A hidden monitor window makes that monitor unopenable for the person at the machine.** Task
   Manager is single-instance per session, so a hidden instance does not sit quietly beside a new
   one - it swallows it. Measured with nothing running to begin with: starting one hidden gives one
