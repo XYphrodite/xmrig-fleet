@@ -27,9 +27,7 @@ public sealed class SettingsScreen
             AnsiConsole.Write(new Panel(grid).Border(BoxBorder.Rounded).Expand());
             AnsiConsole.WriteLine();
 
-            var choice = AnsiConsole.Prompt(new SelectionPrompt<string>()
-                .Title("Change")
-                .AddChoices(
+            var choice = AnsiConsole.Prompt(UiHelpers.Menu("Change", "< back",
                     "Fleet token",
                     "Pool & wallet",
                     "Electricity price",

@@ -542,6 +542,21 @@ xmrig-fleet/
       disabled, restarting the agent service brought it back on its own —
       `GPU autostart: GPU miner started on CR29, pid 18544` in the node's log. This is what makes
       the agent a replacement for a task with a boot trigger rather than a downgrade from one
+- [x] **The card came back after a real reboot, and the pause fired on real traffic.** On
+      2026-09-05 `mks68i7rtx` restarted for a driver install and the node's log reads
+      `15:37:50 GPU autostart: GPU miner started on CR29, pid 6512` — twelve seconds after boot,
+      with every scheduled task disabled and nobody watching. Four minutes later
+      `15:42:12 GPU mining paused: port 11434 busy, 1 connection(s)`: somebody asked the model
+      something and the miner stood down, unprompted. The service-restart test above proved the
+      code path; this proves the feature
+- [x] **PawnIO restores CPU temperature and package power.** Installed 2.2.0 on `mks68i7rtx`
+      (signed by `CN=namazso.eu`, Microsoft countersignature) and restarted the agent, because
+      LibreHardwareMonitor only opens the driver at start-up. The node went from
+      `estimatedPowerWatts` empty and `powerIsMeasured=false` to **158.8 W measured** — 123.8 W of
+      CPU package under a 7,246 H/s miner, at **92 °C**, a temperature this project had never once
+      been able to read. `HardwareDto.SensorNotice` cleared itself, which is the diagnostic
+      agreeing with the library as designed. The card's own draw is still absent: an RTX 4060
+      reports no power sensor at all, at 100% load, so ~110 W of that node remains uncounted
 
 ### Implemented, Not Yet Verified Live ⏳
 - [ ] **Autostart from the console.** Whether a node mines as soon as its agent starts is now a
@@ -578,7 +593,6 @@ xmrig-fleet/
       SID — but nothing has been installed yet. The node has no shell, which is why the Task
       Manager entry-point failure on it is still undiagnosed
 - [ ] Linux agent: systemd unit, `linux-static-x64` install path, `/sys` sensors
-- [ ] Whether installing PawnIO actually restores CPU temperature and package power
 
 ### Planned 📋
 - [ ] **Finish GPU mining out of the CLI.** Four pieces, in the order they hurt: an interactive
@@ -588,9 +602,10 @@ xmrig-fleet/
 - [ ] **Pool adapters for what a card actually earns.** Kryptex and unMineable both publish a
       balance API. Until they are read, the card's electricity is charged and its income is not,
       which makes Economics read worse than the truth
-- [ ] **Bring CPU temperature and package power online**: install PawnIO on one node,
-      confirm the sensors appear, then roll it out fleet-wide and drop the
-      `powerFallbackWatts` workaround where real readings exist
+- [ ] **Roll PawnIO out to the rest of the fleet.** Proven on `mks68i7rtx` (see the verified
+      list); `desktop-ib88isg` and `re-7lqd67ahcm0r` still report no CPU power at all. The dev box
+      is the awkward one: Memory Integrity is on there (`SecurityServicesRunning=2`), which is the
+      combination PawnIO's authors make no claim about
 - [ ] Roll `powerFallbackWatts` out from real wall-meter readings, so the economics stop
       resting on estimates
 - [ ] Hashrate history with a sparkline per node
@@ -724,8 +739,8 @@ xmrig-fleet/
 ## Document Information
 
 **Document Version**: v1.2
-**Last Updated**: 2026-09-04
-**Product Version**: 1.10.1
+**Last Updated**: 2026-09-05
+**Product Version**: 1.11.0
 **Status**: Active
 **Repository**: `c:\Repos\xmrig-fleet` (branch `master`), published at
 [github.com/XYphrodite/xmrig-fleet](https://github.com/XYphrodite/xmrig-fleet)
