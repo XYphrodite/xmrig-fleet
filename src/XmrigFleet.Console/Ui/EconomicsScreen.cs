@@ -8,6 +8,7 @@ public sealed class EconomicsScreen
     private readonly FleetConfig _config;
     private readonly FleetService _fleet;
     private readonly MarketService _market;
+    private readonly GpuPoolService _gpuPool = new();
 
     public EconomicsScreen(FleetConfig config, FleetService fleet, MarketService market)
     {
@@ -83,6 +84,8 @@ public sealed class EconomicsScreen
                 $"[grey]Cost to mine 1 XMR:[/] {money.Markup(costPerXmr)}  " +
                 $"[grey](break-even XMR price at current draw)[/]");
         }
+
+        await ShowCardsAsync(states, currency, money, ct);
 
         AnsiConsole.WriteLine();
         var breakdown = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey35)
@@ -166,4 +169,128 @@ public sealed class EconomicsScreen
             "the pool figure is a rolling 24h for the entire wallet, including any machine outside " +
             "this fleet. They diverge on variance alone, so read a gap as a hint, not a verdict.[/]");
     }
+
+    /// <summary>
+    /// What the graphics cards earned, which nothing above this line knows about: the tables are
+    /// built from Hashvault, and Hashvault has never heard of the coin a card mines.
+    ///
+    /// The settings come from each node rather than from fleet.json, because the node is where they
+    /// are true. A card set up by pushing settings straight to an agent - which is how the fleet's
+    /// first one was - leaves nothing behind in the operator's config to read.
+    ///
+    /// Unlike everything else on this screen these are not estimates. They are sums of payments the
+    /// pool has already made, which is why they are shown per coin and not folded into the profit
+    /// line above until the operator can see both.
+    /// </summary>
+    private async Task ShowCardsAsync(
+        IReadOnlyList<NodeState> states, string currency, MoneyFormat money, CancellationToken ct)
+    {
+        var mining = states.Where(s => s.GpuMining).ToList();
+        if (mining.Count == 0) return;
+
+        var found = new List<(NodeState Node, GpuPoolStats Stats, double? Price)>();
+        var unreadable = new List<string>();
+
+        await AnsiConsole.Status().StartAsync("Reading what the cards earned...", async _ =>
+        {
+            foreach (var state in mining)
+            {
+                using var client = _fleet.CreateClient(state.Node);
+                var config = await SafeConfigAsync(client, ct);
+
+                if (GpuPoolService.TargetFor(ToConfig(config)) is not { } target)
+                {
+                    unreadable.Add(state.Node.Name);
+                    continue;
+                }
+
+                var stats = await _gpuPool.GetAsync(target, ct);
+                if (stats is null) { unreadable.Add(state.Node.Name); continue; }
+
+                found.Add((state, stats, await _gpuPool.GetPriceAsync(target, currency, ct)));
+            }
+        });
+
+        if (found.Count == 0 && unreadable.Count == 0) return;
+
+        AnsiConsole.WriteLine();
+        var table = new Table().Border(TableBorder.Rounded).BorderColor(Color.Grey35)
+            .Title("[bold]Graphics cards, from payments the pool actually made[/]")
+            .AddColumn("Node")
+            .AddColumn("Coin")
+            .AddColumn(new TableColumn("Per day").RightAligned())
+            .AddColumn(new TableColumn("Value/day").RightAligned())
+            .AddColumn(new TableColumn("Paid out").RightAligned())
+            .AddColumn(new TableColumn("On the pool").RightAligned())
+            .AddColumn("Measured over");
+
+        var now = DateTimeOffset.UtcNow;
+        double? valuePerDay = null;
+
+        foreach (var (state, stats, price) in found)
+        {
+            var perDay = stats.PaidPerDay();
+            var span = stats.PayoutSpan();
+            double? value = perDay is { } p && price is { } q ? p * q : null;
+            if (value is { } v) valuePerDay = (valuePerDay ?? 0) + v;
+
+            table.AddRow(
+                new Markup(UiHelpers.Escape(state.Node.Name)),
+                new Markup(UiHelpers.Escape(stats.Target.Coin.ToUpperInvariant())),
+                new Markup(perDay is { } d ? $"[aqua]{d:N0}[/]" : "[grey]-[/]"),
+                new Markup(value is null ? $"[grey]price unavailable in {UiHelpers.Escape(currency)}[/]" : money.Markup(value)),
+                new Markup(stats.Paid is { } paid ? $"{paid:N2}" : "[grey]-[/]"),
+                new Markup(stats.Pending is { } pending
+                    ? $"{pending:N2}" + (stats.Threshold is { } t ? $" [grey]/ {t:N0}[/]" : "")
+                    : "[grey]-[/]"),
+                // Naming the window is the point: two payouts four hours apart do not describe a
+                // day, and a rate presented without its window invites being read as one. The age
+                // of the last payment is beside it because a rate measured over a stale window is
+                // history, not a forecast.
+                new Markup(span is { } s
+                    ? $"[grey]{s.TotalHours:N0} h, {stats.Payouts.Count} payout(s)[/]" + Age(stats, now)
+                    : "[yellow]too few payouts to say[/]"));
+        }
+
+        AnsiConsole.Write(table);
+
+        if (valuePerDay is { } total)
+        {
+            AnsiConsole.MarkupLine(
+                $"[grey]Cards add[/] {money.Markup(total)} [grey]a day that the tables above do not " +
+                "count - they are built from Hashvault, which only knows Monero.[/]");
+        }
+
+        foreach (var name in unreadable)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]{UiHelpers.Escape(name)}[/] [grey]is mining on a card whose pool this console " +
+                "cannot read. Only Kryptex is understood; the electricity still counts against it.[/]");
+        }
+    }
+
+    /// <summary>Flags a rate whose newest payment is old enough that it describes the past.</summary>
+    private static string Age(GpuPoolStats stats, DateTimeOffset now)
+    {
+        if (stats.LastPayoutAt is not { } last) return "";
+        var since = now - last;
+        return since < TimeSpan.FromHours(12)
+            ? ""
+            : $" [yellow]last paid {since.TotalHours:N0} h ago[/]";
+    }
+
+    private static async Task<XmrigFleet.Contracts.MinerConfigDto?> SafeConfigAsync(AgentClient client, CancellationToken ct)
+    {
+        try { return await client.GetConfigAsync(ct); }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The node's own answer, in the shape the target reader expects.</summary>
+    private static GpuMinerConfig? ToConfig(XmrigFleet.Contracts.MinerConfigDto? config) =>
+        config?.GpuMiner is not { } gpu
+            ? null
+            : new GpuMinerConfig { Enabled = gpu.Enabled, PoolUrl = gpu.PoolUrl, User = gpu.User };
 }
