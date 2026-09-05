@@ -192,6 +192,7 @@ install/push/autostart/logs), `NodesScreen` (discover/add/edit/test), `HardwareS
 | `FleetService` | Parallel poll and parallel command fan-out, error normalisation; resolves the throttle and GPU settings each node should get before pushing them |
 | `AgentClient` | Typed HTTP client for one agent, long timeout for installs |
 | `MarketService` | Hashvault wallet/pool parsing, atomic-unit scaling, price, 30s cache |
+| `GpuPoolService` | What a card actually earned, which Hashvault cannot answer because the card mines another coin. Reads Kryptex, works the pool and address out of the node's own GPU settings, and takes its daily rate from payments the pool really made rather than from a counter |
 | `Economics` | Electricity cost, expected income, per-node profit split |
 | `TailscaleService` | Parses `tailscale status --json` for node discovery, storing the MagicDNS name rather than the address when this machine resolves it |
 | `FleetConfig` | `fleet.json` load/save (override with `XMRIG_FLEET_CONFIG`) |
@@ -223,6 +224,7 @@ chasing coverage.
 | `AutoStartTests` | An autostart push keeps the tuned ladder and the rest of the node's config; the setting survives an agent restart; the node's own answer beats the installed default while an untold node still follows it; autostart does not restart a miner the throttle stopped; and "unset" reads differently from "off" |
 | `GpuMiningTests` | A push that turns the card on keeps the lolMiner path and the session flag the node already knew; a pause rule naming a port replaces one naming a process rather than merging into a rule matching both; a node override replaces only what it names; and the stand-down is immediate while the return waits out the quiet period, restarted by any interruption |
 | `LoadJournalTests` | A minute closes once and only when the next one starts; a peak survives an average that hides it; an unusable sample is counted rather than averaged in as an idle machine; a minute nobody could measure still produces a line; throttling off reads differently from a rung of 0%; a gap does not merge two minutes; and memory survives a sample whose CPU delta did not |
+| `GpuPoolTests` | The pool and coin slug are read out of the stratum host and the worker name is not mistaken for part of the address; a pool this console cannot read is declined rather than guessed at, because a wrong address answers with somebody else's zero instead of an error; the daily rate is measured over the window the payouts cover, is refused on a single payout, and reads a long history over its last day only |
 | `MenuNavigationTests` | Arrows wrap in both directions; Escape answers with the menu's own way out and never with one of a two-answer menu's answers; the node picker backs out to null and the multi-picker to an empty list rather than the whole fleet; and a menu cannot be built with a cancel value it does not offer |
 
 `AnsiConsole.Console` is a global that the markup tests swap, so
@@ -572,6 +574,13 @@ xmrig-fleet/
       ladder reacts to everything except the miner, so that figure cannot exceed ~41% at full
       speed and the shipped `70% -> stop` rung never fires. This had been an argument from
       arithmetic; it is now a reading
+- [x] **What a card earned, read from the pool and shown in Economics.** Verified against the live
+      Kryptex API on 2026-09-05: the RTX 4060's target was derived from the node's own GPU settings
+      (`xtm-c29.kryptex.network` → provider and coin slug; `address/worker` → address), and the
+      adapter returned `paid=1155.12 XTM`, `confirmed=104.62`, `unconfirmed=159.07`, five payouts,
+      and **1,039.10 XTM/day over a 22 h window** — matching a figure computed by hand from the raw
+      JSON to a tenth. Priced through CoinGecko's `minotari` at 0.069066 ₽, that is ≈71.8 ₽/day the
+      fleet had been earning invisibly
 
 ### Implemented, Not Yet Verified Live ⏳
 - [ ] **Whether a minute is the right bucket for the load journal.** The journal itself is
@@ -618,15 +627,14 @@ xmrig-fleet/
       session launcher (without it one node cannot be driven from the console at all), a
       `GpuInstallerService` so lolMiner arrives the way XMRig does, a `GpuScreen` in the TUI, and a
       per-node record of every pause and resume the way `throttle.log` records rungs
-- [ ] **Pool adapters for what a card actually earns.** Now a small job rather than a scrape:
-      Kryptex publishes an OpenAPI spec at `pool.kryptex.com/openapi.yaml` and needs no key.
-      `{coin}/api/v1/miner/balance/{address}` and `.../payouts/{address}/stats` give confirmed,
-      unconfirmed, paid and unpaid; the coin slug is algorithm-specific (`xtm-c29`, not `xtm`) and
-      the coin comes **before** `/api/v1`, which is why every obvious guess 404s. Worth doing: the
-      RTX 4060 is measured at 1,039 XTM/day from five actual payouts, against a whole CPU fleet
-      earning about 45 ₽/day, and none of it reaches Economics. Note the card mines a coin
-      Hashvault has never heard of, so `MarketService` needs a second source rather than another
-      endpoint on the first, and CoinGecko's id for it is `minotari`
+- [ ] **Fold the cards into the profit line, and read the other pool.** `GpuPoolService` reads
+      Kryptex and Economics shows it in its own table, but the headline profit still counts a
+      card's electricity without its revenue — on this fleet, roughly 72 ₽/day missing from a
+      45 ₽/day figure. Doing it properly means deciding how two coins share one column when one
+      figure is a measurement and the other an estimate, which is why it was not done by simply
+      adding them. unMineable is the other half: it publishes a balance API too, and its login
+      shape (`XMR:address.worker`) is exactly why `TargetFor` declines it today rather than
+      deriving a confident wrong address.
 - [ ] **Roll PawnIO out to the rest of the fleet.** Proven on `mks68i7rtx` (see the verified
       list); `desktop-ib88isg` and `re-7lqd67ahcm0r` still report no CPU power at all. The dev box
       is the awkward one: Memory Integrity is on there (`SecurityServicesRunning=2`), which is the
@@ -662,13 +670,13 @@ xmrig-fleet/
 - **lolMiner is installed by hand.** `gpuMinerPath` records where it went; there is no
   `/gpu/install` to match the CPU miner's. A node whose path is wrong reports a clear failure
   rather than mining nothing quietly, but somebody still has to walk the file over.
-- **A card's earnings are not in Economics, and the gap is now sized.** The electricity a mining
-  card burns is charged like any other draw, but the income side reads Hashvault, which knows only
-  Monero. As of 2026-09-05 the RTX 4060 has been **paid 1,155 XTM across five completed payouts** —
-  about 1,039 XTM/day, worth roughly what the whole CPU fleet earns — and Economics shows none of
-  it. So the fleet does not merely understate its revenue: it reports a profit that is wrong by
-  more than the profit itself. Measured figures live in
-  [MiningMeasurements.md](MiningMeasurements.md) until the pool adapter exists.
+- **A card's earnings are shown but not yet folded into the profit line.** `GpuPoolService` reads
+  what the pool has actually paid and Economics shows it in its own table, deliberately beside the
+  Monero figures rather than inside them: two coins summed into one "income" column lose the thing
+  that distinguishes them, and one is a measurement while the other is an estimate. The consequence
+  is that the headline **Profit/day still counts the cards' electricity and not their revenue** —
+  on this fleet that is roughly 72 ₽/day missing from a 45 ₽/day figure. Only Kryptex is read;
+  unMineable spells its login differently and is declined rather than guessed at.
 - **A hidden monitor window makes that monitor unopenable for the person at the machine.** Task
   Manager is single-instance per session, so a hidden instance does not sit quietly beside a new
   one - it swallows it. Measured with nothing running to begin with: starting one hidden gives one
@@ -775,7 +783,7 @@ xmrig-fleet/
 
 **Document Version**: v1.2
 **Last Updated**: 2026-09-05
-**Product Version**: 1.12.0
+**Product Version**: 1.13.0
 **Status**: Active
 **Repository**: `c:\Repos\xmrig-fleet` (branch `master`), published at
 [github.com/XYphrodite/xmrig-fleet](https://github.com/XYphrodite/xmrig-fleet)
