@@ -22,9 +22,7 @@ public sealed class NodesScreen
             UiHelpers.Header("Nodes");
             RenderList();
 
-            var choice = AnsiConsole.Prompt(new SelectionPrompt<string>()
-                .Title("Action")
-                .AddChoices(
+            var choice = AnsiConsole.Prompt(UiHelpers.Menu("Action", "< back",
                     "Discover from tailnet",
                     "Add manually",
                     "Edit node",
@@ -111,6 +109,10 @@ public sealed class NodesScreen
         var picked = AnsiConsole.Prompt(new MultiSelectionPrompt<TailnetMachine>()
             .Title("Machines to add as mining nodes")
             .PageSize(15)
+            .WrapAround(true)
+            // Empty, which the caller below already reads as "chose nothing". The overload taking
+            // an item would answer Escape by adding that machine to the fleet.
+            .AddCancelResult()
             .NotRequired()
             .InstructionsText("[grey](space to toggle, enter to confirm)[/]")
             // Hostnames and the OS name come from tailscale; escaped because the prompt

@@ -298,10 +298,25 @@ limit, not a measurement.
 **Test**: step `nvidia-smi -pl` through 115/100/85/70 W, recording hashrate and temperature at each.
 Produces the heat-per-rouble curve — which matters here because the heat is wanted.
 
-### 7. PawnIO
+### 7. PawnIO — answered on 2026-09-05
 
-Still unresolved from before this work: CPU temperature and package power need it, and nobody has
-installed it on a node to see whether the sensors appear.
+Installed 2.2.0 on `mks68i7rtx`. The sensors appear, and the numbers were worth having:
+
+| | Before | After |
+|---|---|---|
+| `estimatedPowerWatts` | empty | **158.8 W** |
+| `powerIsMeasured` | false | **true** |
+| CPU package | — | **123.8 W** under a 7,246 H/s miner |
+| CPU temperature | — | **92 °C** |
+
+That node had been contributing **zero watts** to the fleet total while mining on both the CPU and
+the card. 158.8 W is CPU package plus the flat 35 W board overhead; the RTX 4060 reports no power
+sensor at all, at 100% load, so roughly 110 W of that node is still uncounted and only a wall meter
+will settle it.
+
+**Remaining**: `desktop-ib88isg` and `re-7lqd67ahcm0r` are still without it. The dev box is the
+awkward one — Memory Integrity is on there, which is the combination PawnIO makes no compatibility
+claim about, so expect either nothing to change or a `CodeIntegrity/Operational` event 3033.
 
 ### 8. Automatic huge-page recovery
 

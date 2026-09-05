@@ -139,6 +139,29 @@ public static class UiHelpers
     public static TextPrompt<string> Text(string label) =>
         new TextPrompt<string>(label).WithConverter(Escape);
 
+    /// <summary>
+    /// A menu that wraps from the last entry back to the first, and that answers Escape with
+    /// <paramref name="escapeTo"/>.
+    ///
+    /// Both are Spectre settings rather than anything written here, and both are off by default.
+    /// Wrapping is harmless. The cancel result is not: Spectre hands it back as an ordinary
+    /// answer, indistinguishable from a choice the operator made. A menu read with <c>== "on"</c>
+    /// or falling through a <c>default:</c> would therefore treat Escape as a decision - once
+    /// measured as pushing "autostart off" to every selected node. So the way out is named here,
+    /// beside the choices, and every caller has to handle it like any other answer.
+    /// </summary>
+    public static SelectionPrompt<string> Menu(string title, string escapeTo, params string[] choices)
+    {
+        if (!choices.Contains(escapeTo))
+            throw new ArgumentException($"'{escapeTo}' must be one of the menu's own choices.", nameof(escapeTo));
+
+        return new SelectionPrompt<string>()
+            .Title(Escape(title))
+            .WrapAround(true)
+            .AddCancelResult(escapeTo)
+            .AddChoices(choices);
+    }
+
     // Prompt choices are rendered as markup, so a name carrying [ or ] would be read as a
     // style tag and crash the prompt. Selecting the objects themselves and escaping only in
     // the converter keeps the display safe without mangling the underlying value.
@@ -158,6 +181,10 @@ public static class UiHelpers
         var picked = AnsiConsole.Prompt(new SelectionPrompt<NodeConfig>()
             .Title(Escape(prompt))
             .PageSize(15)
+            .WrapAround(true)
+            // The sentinel itself, not a copy: Spectre returns the cancel value as the same
+            // instance, which is what the ReferenceEquals below is already checking for.
+            .AddCancelResult(BackChoice)
             .UseConverter(n => ReferenceEquals(n, BackChoice) ? "< back" : Escape(n.ToString()))
             .AddChoices(config.Nodes.Append(BackChoice)));
 
@@ -178,6 +205,11 @@ public static class UiHelpers
         var picked = AnsiConsole.Prompt(new MultiSelectionPrompt<NodeConfig>()
             .Title(Escape(prompt))
             .PageSize(15)
+            .WrapAround(true)
+            // The no-argument overload, which cancels to an empty list. The overload that takes an
+            // item would answer Escape with that item selected - and the item nearest to hand here
+            // is "all enabled nodes", so a mis-key would aim a fleet-wide command at the fleet.
+            .AddCancelResult()
             .InstructionsText("[grey](space to toggle, enter to confirm)[/]")
             .UseConverter(n => ReferenceEquals(n, AllChoice) ? "* all enabled nodes" : Escape(n.ToString()))
             .AddChoices(enabled.Prepend(AllChoice)));

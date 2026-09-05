@@ -67,10 +67,9 @@ try
             AnsiConsole.MarkupLine("[yellow]No fleet token set - agents with a token will reject this console.[/]");
         AnsiConsole.WriteLine();
 
-        var choice = AnsiConsole.Prompt(new SelectionPrompt<string>()
-            .Title("Main menu")
-            .PageSize(12)
-            .AddChoices(
+        // Escape at the top of the tree has nowhere further back to go, so it leaves - the same
+        // answer as the entry the operator would otherwise have to scroll past everything to reach.
+        var choice = AnsiConsole.Prompt(UiHelpers.Menu("Main menu", "Exit",
                 "Dashboard (live)",
                 "Miner control",
                 "Nodes",
@@ -78,7 +77,8 @@ try
                 "Economics",
                 "Pool & wallet",
                 "Settings",
-                "Exit"));
+                "Exit")
+            .PageSize(12));
 
         switch (choice)
         {

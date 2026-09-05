@@ -21,9 +21,7 @@ public sealed class MinerScreen
         {
             UiHelpers.Header("Miner control");
 
-            var choice = AnsiConsole.Prompt(new SelectionPrompt<string>()
-                .Title("Action")
-                .AddChoices(
+            var choice = AnsiConsole.Prompt(UiHelpers.Menu("Action", "< back",
                     "Start mining",
                     "Stop mining",
                     "Restart mining",
@@ -179,9 +177,13 @@ public sealed class MinerScreen
             UiHelpers.Result(result.Ok, $"{node.Name}: {result.Message}");
         AnsiConsole.WriteLine();
 
-        var enable = AnsiConsole.Prompt(
-            new SelectionPrompt<string>().Title("Autostart should be").AddChoices("on", "off"))
-            == "on";
+        // A two-answer menu read with `== "on"` has no way to say "never mind", and Escape would
+        // have had to mean one of them: "off", pushed to every node picked above. Turning the
+        // fleet's autostart off is exactly the setting that leaves a rebooted rig idle until
+        // somebody notices, so the third answer is spelled out rather than inferred.
+        var answer = AnsiConsole.Prompt(UiHelpers.Menu("Autostart should be", "< back", "on", "off", "< back"));
+        if (answer == "< back") return;
+        var enable = answer == "on";
 
         IReadOnlyList<(NodeConfig Node, CommandResultDto Result)> results = [];
         await AnsiConsole.Status().StartAsync(enable ? "Enabling..." : "Disabling...", async _ =>
@@ -230,9 +232,11 @@ public sealed class MinerScreen
         var nodes = UiHelpers.SelectNodes(_config, "Change which nodes?");
         if (nodes.Count == 0) return;
 
-        var enable = AnsiConsole.Prompt(
-            new SelectionPrompt<string>().Title("Session monitor should be").AddChoices("on", "off"))
-            == "on";
+        // Same shape as autostart and a costlier mistake: switching this off was measured at
+        // 7,092 -> 4,380 H/s on one node, so Escape must not be able to mean "off".
+        var answer = AnsiConsole.Prompt(UiHelpers.Menu("Session monitor should be", "< back", "on", "off", "< back"));
+        if (answer == "< back") return;
+        var enable = answer == "on";
 
         var results = new List<(string Node, bool Ok, string Message)>();
         await AnsiConsole.Status().StartAsync(enable ? "Enabling..." : "Disabling...", async _ =>
@@ -366,9 +370,11 @@ public sealed class MinerScreen
         var nodes = UiHelpers.SelectNodes(_config, "Change which nodes?");
         if (nodes.Count == 0) return;
 
-        var choice = AnsiConsole.Prompt(new SelectionPrompt<string>()
-            .Title("Power limit should be")
-            .AddChoices("automatic", "off", "pinned by hand"));
+        // "pinned by hand" sits on the `default:` arm below, so without a way out of its own this
+        // menu would answer Escape by asking for a percentage and then writing fleet.json.
+        var choice = AnsiConsole.Prompt(
+            UiHelpers.Menu("Power limit should be", "< back", "automatic", "off", "pinned by hand", "< back"));
+        if (choice == "< back") return;
 
         int? pinned = null;
         var clearManual = false;
