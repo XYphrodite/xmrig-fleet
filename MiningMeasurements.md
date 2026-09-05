@@ -261,15 +261,50 @@ divide by minutes actually mined. Nothing else has been reliable.
 
 Ordered by expected value, not by effort.
 
-### 1. Monero + Tari merge mining — the largest unexplored lever
+### 1. Monero + Tari merge mining — the largest unexplored lever, now with numbers
 
-Tari is merge-mineable with Monero's RandomX. The fleet already runs 14.3 kH/s of RandomX around
-the clock, so merge mining would earn XTM **on top of** existing XMR with no extra hardware and no
-extra watts. Requires a full `monerod`, a Tari base node, and the Tari merge-mining proxy — or a
-P2Pool-based stack. Pools supporting it were experimental as of 2024.
+Tari is merge-mineable with Monero's RandomX, so the same hashes earn both. Computed 2026-09-05
+from Kryptex's live network figures, at XMR 46,300 ₽ and XTM 0.069066 ₽:
 
-**Test**: stand the stack up on one node, point that node's xmrig at the proxy, and compare its XMR
-credit before and after — merge mining must not reduce it — while watching XTM accrue.
+| Per 1 kH/s of RandomX, per day | Yield | Value |
+|---|---:|---:|
+| Monero | 0.0000721 XMR | **3.34 ₽** |
+| Tari on RandomX | 38.11 XTM | **2.63 ₽** |
+| Both, merge-mined | — | **5.97 ₽** |
+
+Two conclusions, and the first is the one worth saying out loud:
+
+**Switching the CPUs to Tari would lose money.** Monero pays 27% more per hash than Tari does on
+the same algorithm. Tari only wins when it is earned *as well as* Monero, not instead of it.
+
+**Merge mining is worth +79%** — on this fleet's 14.87 kH/s, about **+39 ₽/day for no extra watts
+at all**. That is nearly the entire current CPU income again.
+
+**The method is cross-checked.** Applied to the RTX 4060 on Cuckaroo29 it predicts 944 XTM/day
+where five real payouts measured 1,039 — it under-predicts by 10%, so the Tari-RandomX figure
+above is if anything conservative.
+
+**The break-even is 0.0876 ₽ per XTM.** Above that, Tari on RandomX out-earns Monero outright and
+the question stops being about merge mining. XTM is at 0.069 today, so it would have to rise 27%.
+It roughly doubled in the month before this was written, which is the whole reason to keep this
+number written down rather than the conclusion.
+
+**Test**: stand the stack up on one node — a full `monerod`, a Tari base node and the Tari
+merge-mining proxy — point that node's xmrig at the proxy, and compare its XMR credit before and
+after (merge mining must not reduce it) while watching XTM accrue. Note this is real
+infrastructure, not a config change: `monerod` alone is a few hundred GB.
+
+### 1a. Per watt, the card already beats every CPU in the fleet
+
+| | Income/day | Draw | Per watt |
+|---|---:|---:|---:|
+| RTX 4060 on Cuckaroo29 | 71.8 ₽ *measured from payouts* | ~110 W | **0.652 ₽/W** |
+| i7-12700KF on Monero | 24.2 ₽ | 124 W *measured* | **0.195 ₽/W** |
+
+**3.3x**, and it was invisible until the payouts and PawnIO landed on the same day. This does not
+mean sell the CPUs: the card's figure rests on a coin worth $0.0008 that recently doubled, and
+Monero's does not. But it does mean a second card would earn more than a second CPU, and that the
+fleet's shape was chosen when neither number was visible.
 
 ### 2. Does the Tari payout actually arrive? — answered on 2026-09-05: **yes**
 
