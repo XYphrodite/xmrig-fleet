@@ -560,15 +560,24 @@ xmrig-fleet/
       been able to read. `HardwareDto.SensorNotice` cleared itself, which is the diagnostic
       agreeing with the library as designed. The card's own draw is still absent: an RTX 4060
       reports no power sensor at all, at 100% load, so ~110 W of that node remains uncounted
+- [x] **A node keeps a record of its own load, throttling on or off.** Verified on `mks68i7rtx`
+      minutes after the 1.12.0 roll-out: six consecutive per-minute lines through `/throttle/log`,
+      each carrying the average, the peak, the busy-thread translation and memory, with `off` in
+      the rung column because throttling is not on there. The first line reads `[1 unusable]` —
+      the sample taken immediately after the agent restarted, which cannot yield a percentage
+      because a percentage needs two. That it says so rather than printing a zero is the whole
+      design in one line
+- [x] **The throttle's stop rung is unreachable, and the journal proved it in six minutes.** Those
+      same lines read `miner=59.2..59.7%` — twelve mining threads on twenty logical CPUs. The
+      ladder reacts to everything except the miner, so that figure cannot exceed ~41% at full
+      speed and the shipped `70% -> stop` rung never fires. This had been an argument from
+      arithmetic; it is now a reading
 
 ### Implemented, Not Yet Verified Live ⏳
-- [ ] **A node's load journal, read back.** Every node now writes one line a minute about its own
-      CPU whether or not throttling is on, because throttling ships off and the diagnostic was
-      locked behind the remedy: an operator whose machine felt slow had nothing to look at
-      afterwards. Prompted by exactly that — a Steam download that crawled until the operator
-      stopped mining by hand, with no record left of what the machine had been doing. Unit-tested
-      and built; nothing has yet read a day of it off a live node to see whether a minute is the
-      right bucket or the peak the right statistic
+- [ ] **Whether a minute is the right bucket for the load journal.** The journal itself is
+      verified (see above), but only over six minutes of an idle machine. Nobody has yet read a
+      working day of it back and asked whether a per-minute peak catches what an operator
+      complains about, or whether the interesting events are shorter than that
 - [ ] **Autostart from the console.** Whether a node mines as soon as its agent starts is now a
       pushed per-node setting rather than a hand edit to `appsettings.json` on the machine, with
       **Miner control → Start mining when the node boots** and `xmrig-fleet autostart` as its
@@ -672,6 +681,13 @@ xmrig-fleet/
   freeze. The practical consequence is that intermediate rungs are a poor trade (rung 75 gives up
   ~59% of the hashrate to free a quarter of the miner's CPU time), and a two-rung ladder of full
   speed and stopped is the honest shape unless fine control is really wanted.
+- **The ladder's top rung is unreachable, and this is now measured rather than argued.** The
+  journal's first six minutes on `mks68i7rtx` read `miner=59.2..59.7%` — twelve mining threads on
+  twenty logical CPUs, which is 60% to a tenth. Since the ladder is read against everything
+  *except* the miner, "other" cannot exceed ~41% while the miner runs at full speed, and the
+  shipped `70% -> stop` rung therefore never fires from full speed. `45% -> 25` is reachable only
+  just. A ladder whose stop rung cannot be reached is not a safety net, which strengthens the case
+  the hashrate measurements already made for a two-rung shape over a tuning exercise.
 - **The ladder is read against the whole machine's CPU, which hides single-threaded work on a
   many-core node.** One busy thread is 8% of a 12-thread node but 3.6% of the 28-thread Xeon, so
   the same rung means different amounts of interference on different rigs, and on the Xeon a

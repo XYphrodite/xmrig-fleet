@@ -134,6 +134,24 @@ paid automatically each hour, no payout fee, 1% pool fee.
 
 These cost hours to find and will cost them again if forgotten.
 
+- **The throttle's stop rung cannot be reached, measured 2026-09-05.** The node's own load journal,
+  six minutes after it first ran on `mks68i7rtx`, reads `miner=59.2..59.7%` — twelve mining threads
+  on twenty logical CPUs, 60% to a tenth. The ladder is read against everything *except* the miner,
+  so while the miner runs at full speed the figure it reacts to can never exceed ~41%:
+
+  | Other CPU | Rung | Reachable from full speed? |
+  |---:|---|---|
+  | 0% | 100 | — |
+  | 10% | 75 | yes |
+  | 25% | 50 | yes |
+  | 45% | 25 | only just |
+  | **70%** | **0 (stop)** | **no** |
+
+  So a fleet that switched throttling on expecting the miner to get out of the way would find it
+  giving up 72% of its hashrate at rung 50 and never stopping at all. Combined with the measured
+  cost of a cap, this is the strongest argument yet for the two-rung ladder.
+
+
 - **Task Scheduler starts actions at priority 7 (BelowNormal).** With xmrig holding every CPU
   thread, the GPU miner could not submit shares before they went stale: **18% bad-share rate** on
   Cuckaroo29. Setting the task's `Priority` to 4 stopped it dead — valid shares went 18 → 137 with
