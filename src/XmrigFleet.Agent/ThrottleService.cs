@@ -27,6 +27,7 @@ public sealed class ThrottleService : BackgroundService
     private readonly ILogger<ThrottleService> _log;
     private readonly SystemLoadReader _loadReader = new();
     private readonly ThrottleLadder _ladder = new();
+    private readonly LoadJournal _journal = new();
     private readonly object _gate = new();
 
     /// <summary>
@@ -107,8 +108,17 @@ public sealed class ThrottleService : BackgroundService
         var config = _config.Current;
         var settings = config.Throttle;
 
+        // Read before deciding whether to act on it. The journal is the reason: a node with
+        // throttling off used to leave this method here and record nothing, so the only machine
+        // state anybody could look at afterwards was the one the remedy happened to produce.
+        // Sampling is two kernel calls and a process handle - cheap enough to do unconditionally.
+        var load = _loadReader.Read();
+        var now = DateTimeOffset.UtcNow;
+
         if (settings?.Enabled != true)
         {
+            RecordMinute(load, level: null, now);
+
             // The second half of that condition is not redundant. A node whose miner this service
             // stopped, that then restarted into a build with throttling switched off, would never
             // see _wasEnabled true and would sit there not mining with nothing to explain it.
@@ -116,16 +126,11 @@ public sealed class ThrottleService : BackgroundService
             return;
         }
 
-        if (!_wasEnabled)
-        {
-            // Percentages are differences between two samples; a stale one from before the
-            // feature was switched on would read as a load spike that never happened.
-            _loadReader.Reset();
-            _wasEnabled = true;
-        }
+        // No Reset when throttling is switched on any more, and none is needed: the reader is now
+        // called every second either way, so the previous sample is always one tick old rather
+        // than however long ago the feature was last enabled.
+        _wasEnabled = true;
 
-        var load = _loadReader.Read();
-        var now = DateTimeOffset.UtcNow;
         int previous, level;
         string reason;
 
@@ -155,6 +160,8 @@ public sealed class ThrottleService : BackgroundService
             reason = _ladder.Reason;
         }
 
+        RecordMinute(load, level, now);
+
         await ApplyAsync(level, reason, ct);
 
         if (level != previous)
@@ -162,6 +169,12 @@ public sealed class ThrottleService : BackgroundService
             _decisions.Record(previous, level, reason, load);
             _log.LogInformation("Throttle {From}% -> {To}% ({Reason})", previous, level, reason);
         }
+    }
+
+    /// <summary>Hands the sample to the journal, and writes the line out when a minute closes.</summary>
+    private void RecordMinute(SystemLoad load, int? level, DateTimeOffset now)
+    {
+        if (_journal.Add(load, level, now) is { } minute) _decisions.Record(minute);
     }
 
     /// <summary>

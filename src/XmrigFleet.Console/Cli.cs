@@ -34,7 +34,8 @@ public static class Cli
           --sync       push the rules from fleet.json, keeping the automation in charge
           --set=N      pin N percent (0-100) and stand the automation down
           --auto       hand control back to the automation
-          --log        print the node's own record of its decisions
+          --log        print the node's own record: one line a minute of what the CPU was
+                       doing, whether or not throttling is on, plus every rung change
 
         autostart [node ...] [--on | --off]
           no options   report what each node does when it boots
