@@ -168,7 +168,8 @@ hardware.
 | `ThrottleLadder` | The rung rule itself — pure, clock-injected, and the part the tests drive |
 | `MinerCpuLimit` | The CPU cap, a named job object so an agent restart can still lift its own limit |
 | `SystemLoadReader` | `GetSystemTimes` + `GlobalMemoryStatusEx`, with the miner's own CPU time subtracted |
-| `ThrottleLog` | `throttle.log` beside the binary: every rung change with the readings behind it |
+| `ThrottleLog` | `throttle.log` beside the binary: one line a minute of what the CPU was doing, plus every rung change with the readings behind it |
+| `LoadJournal` | Folds the once-a-second samples into that per-minute line. Runs whether or not throttling is on, which is the point: throttling ships off, so a node used to keep no record of its own load at all |
 | `MinerConfigStore` | Durable per-node miner settings |
 | `GpuMinerService` | Start/stop/restart lolMiner, read its loopback API, keep the last 200 output lines. A separate class from `MinerService` on purpose: it runs at Normal priority (Task Scheduler's default of 7 cost 18% of shares to staleness), it never touches an `xmrig` process, and it settles for five seconds rather than 700 ms because a card that will not mine fails quietly |
 | `GpuPauseService` | Stands the card's miner down while a named port has a live connection or a named process runs, and brings it back after the quiet period. Reads the TCP table through `IPGlobalProperties` — `Get-NetTCPConnection` sees nothing from a service |
@@ -221,6 +222,8 @@ chasing coverage.
 | `TailnetDiscoveryTests` | Discovery stores the MagicDNS name only when it resolves here, falls back to the address when it does not or when the tailnet has MagicDNS off, and skips a machine with no tailnet address |
 | `AutoStartTests` | An autostart push keeps the tuned ladder and the rest of the node's config; the setting survives an agent restart; the node's own answer beats the installed default while an untold node still follows it; autostart does not restart a miner the throttle stopped; and "unset" reads differently from "off" |
 | `GpuMiningTests` | A push that turns the card on keeps the lolMiner path and the session flag the node already knew; a pause rule naming a port replaces one naming a process rather than merging into a rule matching both; a node override replaces only what it names; and the stand-down is immediate while the return waits out the quiet period, restarted by any interruption |
+| `LoadJournalTests` | A minute closes once and only when the next one starts; a peak survives an average that hides it; an unusable sample is counted rather than averaged in as an idle machine; a minute nobody could measure still produces a line; throttling off reads differently from a rung of 0%; a gap does not merge two minutes; and memory survives a sample whose CPU delta did not |
+| `MenuNavigationTests` | Arrows wrap in both directions; Escape answers with the menu's own way out and never with one of a two-answer menu's answers; the node picker backs out to null and the multi-picker to an empty list rather than the whole fleet; and a menu cannot be built with a cancel value it does not offer |
 
 `AnsiConsole.Console` is a global that the markup tests swap, so
 [AssemblyInfo.cs](tests/XmrigFleet.Console.Tests/AssemblyInfo.cs) disables parallel runs.
@@ -244,7 +247,7 @@ All routes live under `/api/v1` and require the `X-Fleet-Token` header.
 | `POST` | `/install` | Install or update XMRig into a target directory |
 | `GET` | `/logs` | Last 200 captured output lines |
 | `GET` | `/throttle` | Current power rung, the reason for it, and the load behind it |
-| `GET` | `/throttle/log` | The node's own record of every rung change and its readings |
+| `GET` | `/throttle/log` | The node's own record: one line a minute of CPU load whether or not throttling is on, plus every rung change and its readings |
 | `GET` | `/gpu` | What the graphics card is mining, its shares and its per-device readings |
 | `POST` | `/gpu/start` | Start lolMiner with the stored GPU config |
 | `POST` | `/gpu/stop` | Stop **all** lolMiner processes on the node; XMRig is untouched |
@@ -559,6 +562,13 @@ xmrig-fleet/
       reports no power sensor at all, at 100% load, so ~110 W of that node remains uncounted
 
 ### Implemented, Not Yet Verified Live ⏳
+- [ ] **A node's load journal, read back.** Every node now writes one line a minute about its own
+      CPU whether or not throttling is on, because throttling ships off and the diagnostic was
+      locked behind the remedy: an operator whose machine felt slow had nothing to look at
+      afterwards. Prompted by exactly that — a Steam download that crawled until the operator
+      stopped mining by hand, with no record left of what the machine had been doing. Unit-tested
+      and built; nothing has yet read a day of it off a live node to see whether a minute is the
+      right bucket or the peak the right statistic
 - [ ] **Autostart from the console.** Whether a node mines as soon as its agent starts is now a
       pushed per-node setting rather than a hand edit to `appsettings.json` on the machine, with
       **Miner control → Start mining when the node boots** and `xmrig-fleet autostart` as its
@@ -740,7 +750,7 @@ xmrig-fleet/
 
 **Document Version**: v1.2
 **Last Updated**: 2026-09-05
-**Product Version**: 1.11.0
+**Product Version**: 1.12.0
 **Status**: Active
 **Repository**: `c:\Repos\xmrig-fleet` (branch `master`), published at
 [github.com/XYphrodite/xmrig-fleet](https://github.com/XYphrodite/xmrig-fleet)

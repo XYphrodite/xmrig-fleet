@@ -4,19 +4,26 @@ using System.Text;
 namespace XmrigFleet.Agent;
 
 /// <summary>
-/// Records every change of rung with the readings that caused it, to throttle.log beside the agent.
+/// The node's own record of what its CPU was doing and what the throttle did about it, in
+/// throttle.log beside the agent. Two kinds of line, interleaved in time on purpose: a rung
+/// change when one happens, and one summary line a minute always.
 ///
 /// The thresholds shipped with this feature are a guess. Tuning them from how the machine felt is
 /// how we spent a day chasing a hashrate effect that eleven guesses could not explain, and the
 /// only thing that moved it was a log of numbers. So the log carries the inputs, not just the
 /// outcome: a week of it should say plainly which rung fired for nothing.
 ///
+/// The per-minute line is written whether or not throttling is switched on, which is the whole
+/// point of it. Throttling ships off, so until now a node kept no record of its own load at all,
+/// and "the machine felt slow an hour ago" could only ever be answered by guessing.
+///
 /// Bounded the same way <see cref="FileLogger"/> is - a node runs unattended for months, and no
-/// diagnostic is worth filling its disk.
+/// diagnostic is worth filling its disk. Four megabytes at roughly 150 KB a day is about a month,
+/// and the rotation keeps the month before that.
 /// </summary>
 public sealed class ThrottleLog
 {
-    private const long MaxBytes = 1 * 1024 * 1024;
+    private const long MaxBytes = 4 * 1024 * 1024;
 
     private readonly string _path;
     private readonly object _gate = new();
@@ -37,6 +44,44 @@ public sealed class ThrottleLog
             DateTime.Now, from, to, load.TotalCpuPercent, load.OtherCpuPercent,
             busyThreads, Environment.ProcessorCount, load.MinerCpuPercent, load.MemoryUsedPercent, reason);
 
+        Append(line);
+    }
+
+    /// <summary>
+    /// One minute of load. Written every minute, throttling on or off.
+    ///
+    /// The peak is beside the average because they answer different questions and the average
+    /// alone is the misleading one: a machine that was pinned for eight seconds and idle for the
+    /// other fifty-two reads as barely busy, and that is exactly the shape of a download or a
+    /// build that made somebody reach for the off switch.
+    /// </summary>
+    public void Record(LoadSummary minute)
+    {
+        // The rung, or "off". A node with throttling switched off is not the same as one held at
+        // 0%: the first is unwatched, the second was stopped on purpose.
+        var rung = minute.Level is { } level ? $"{level,3}%" : " off";
+
+        // A minute nobody could measure says so rather than printing a row of zeros, which would
+        // read as a quiet machine - the opposite of what an unusable sample means.
+        var body = minute.Samples > 0
+            ? string.Format(
+                CultureInfo.InvariantCulture,
+                "other avg={0:0.#}% peak={1:0.#}% ({2:0.0} of {3} threads)  miner={4:0.#}%  mem={5:0}%",
+                minute.OtherMeanPercent, minute.OtherPeakPercent,
+                minute.OtherPeakPercent * Environment.ProcessorCount / 100.0, Environment.ProcessorCount,
+                minute.MinerMeanPercent, minute.MemoryPeakPercent)
+            : $"no usable sample in {minute.Unusable} attempt(s)";
+
+        var dropped = minute.Samples > 0 && minute.Unusable > 0 ? $"  [{minute.Unusable} unusable]" : "";
+
+        Append(string.Format(
+            CultureInfo.InvariantCulture,
+            "{0:yyyy-MM-dd HH:mm}     load {1}  {2}{3}",
+            minute.Minute.LocalDateTime, rung, body, dropped));
+    }
+
+    private void Append(string line)
+    {
         lock (_gate)
         {
             try
